@@ -33,6 +33,11 @@
 
 - Bookmark a note or a tag
 - Links use `?` in the URL
+- Note ids are 8 characters, a-z and 0-9
+- Examples:
+  - `http://localhost:5555/?note=k3x9q2mf`
+  - `http://localhost:5555/?tag=work`
+  - `http://localhost:5555/?note=k3x9q2mf&tag=work`
 - Logged out: log in first
 - Not found: 404
 - Back and Forward are ignored
