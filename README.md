@@ -79,7 +79,14 @@ Log in with the username and password you created.
 
 - **New note** creates an empty note and opens it on the right.
 - Click a note in the list on the left to open it. The list is sorted by last
-  modified, newest first. A note's name is its first line.
+  modified, newest first, and shows each note's title (its first line, or
+  "Untitled" if that's blank), last update date/time, and tags.
+- **Tags:** in the bar above the note, type a tag and press Enter; click × to
+  remove one. Tags use lowercase letters and digits only (up to 32 characters,
+  20 per note). Changing tags doesn't count as an update.
+- **Filter:** the dropdown at the top of the list shows only notes with the
+  chosen tag. A new note created while filtering gets that tag.
+- **«** hides the sidebar and **»** brings it back; the browser remembers which.
 - Notes save automatically as you type. The line under the editor shows
   "Saving…", "Saved", or an error if a save failed.
 - **Log out** is at the top of the list.
@@ -102,6 +109,7 @@ Everything lives in `./data`:
 
 - `users.json`: usernames and password hashes
 - `notes/<username>/<id>.txt`: one plain-text file per note
+- `notes/<username>/<id>.json`: that note's tags (only if it has had tags)
 - `session_secret`: signs login cookies. Delete it and restart to log everyone out.
 
 To back up, copy the whole `./data` directory. Stopping Margin first

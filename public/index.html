@@ -30,13 +30,27 @@
     <div id="app-view" hidden>
       <aside id="sidebar">
         <header>
+          <button id="collapse" class="icon" type="button" aria-controls="sidebar" aria-expanded="true"
+                  aria-label="Hide sidebar" title="Hide sidebar">«</button>
           <span class="brand">Margin</span>
           <button id="logout" type="button">Log out</button>
         </header>
+        <select id="tag-filter" aria-label="Show notes with tag">
+          <option value="">All notes</option>
+        </select>
         <button id="new-note" type="button">New note</button>
         <ul id="note-list"></ul>
+        <p id="list-empty" hidden>No notes yet</p>
       </aside>
       <section id="editor">
+        <div id="menu-bar">
+          <button id="expand" class="icon" type="button" aria-controls="sidebar" aria-expanded="false"
+                  aria-label="Show sidebar" title="Show sidebar" hidden>»</button>
+          <ul id="note-tags" aria-label="Tags"></ul>
+          <input id="tag-input" type="text" placeholder="add tag…" aria-label="Add tag" autocomplete="off"
+                 autocapitalize="none" spellcheck="false" maxlength="64" disabled>
+        </div>
+        <p id="tag-message" role="alert"></p>
         <textarea id="note-text" disabled spellcheck="false" placeholder="Select a note or create a new one."></textarea>
         <div id="status" aria-live="polite"></div>
       </section>

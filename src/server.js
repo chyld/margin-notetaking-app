@@ -13,6 +13,7 @@ const PORT = Number(process.env.PORT) || 5555;
 const COOKIE_NAME = 'margin_session';
 const NOTE_BODY_LIMIT = 1024 * 1024;
 const LOGIN_BODY_LIMIT = 4096;
+const TAGS_BODY_LIMIT = 4096;
 const PASSWORD_MAX_BYTES = 1024;
 const LOGIN_MAX_PER_ACCOUNT = 5; // failed attempts per IP + username
 const LOGIN_MAX_PER_IP = 20; // failed attempts per IP, across all usernames
@@ -247,17 +248,61 @@ function saveOrder(req) {
   return { writer, seq: Number(seq) };
 }
 
-async function notes(req, res, id) {
+function hasBody(req) {
+  return req.headers['transfer-encoding'] !== undefined || Number(req.headers['content-length'] || 0) > 0;
+}
+
+// Reads a JSON object body and returns its `tags`, validated and normalized.
+// `required` false means a missing `tags` key is an empty list.
+async function readTagsBody(req, { required }) {
+  requireType(req, 'application/json');
+  let body;
+  try {
+    body = JSON.parse((await readBody(req, TAGS_BODY_LIMIT)).toString('utf8'));
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    throw new HttpError(400, 'Invalid JSON');
+  }
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Expected a JSON object');
+  if (body.tags === undefined && !required) return [];
+  if (body.tags === undefined) throw new HttpError(400, 'tags is required');
+  try {
+    return store.normalizeTags(body.tags);
+  } catch (err) {
+    if (err instanceof store.InvalidTags) throw new HttpError(400, err.message);
+    throw err;
+  }
+}
+
+async function notes(req, res, id, sub) {
   if (req.method !== 'GET') requireSameOrigin(req);
   const username = await requireUser(req);
 
   if (id === null) {
     if (req.method === 'GET') return sendJson(res, 200, await store.listNotes(username));
-    if (req.method === 'POST') return sendJson(res, 201, await store.createNote(username));
+    if (req.method === 'POST') {
+      // Tags are validated before anything is created.
+      const tags = hasBody(req) ? await readTagsBody(req, { required: false }) : [];
+      return sendJson(res, 201, await store.createNote(username, tags));
+    }
     throw methodNotAllowed('GET, POST');
   }
 
   if (!store.isNoteId(id)) throw new HttpError(404, 'Note not found');
+
+  if (sub === 'tags') {
+    if (req.method !== 'PUT') throw methodNotAllowed('PUT');
+    const order = saveOrder(req);
+    const tags = await readTagsBody(req, { required: true });
+    try {
+      return sendJson(res, 200, await store.writeTags(username, id, tags, order));
+    } catch (err) {
+      if (err instanceof store.NotFound) throw new HttpError(404, 'Note not found');
+      throw err;
+    }
+  }
+  if (sub !== null) throw new HttpError(404, 'Not found');
+
   try {
     if (req.method === 'GET') {
       const text = await store.readNote(username, id);
@@ -299,8 +344,13 @@ async function handle(req, res) {
     if (req.method !== 'POST') throw methodNotAllowed('POST');
     return logout(req, res);
   }
-  if (pathname === '/api/notes') return notes(req, res, null);
-  if (pathname.startsWith('/api/notes/')) return notes(req, res, pathname.slice('/api/notes/'.length));
+  if (pathname === '/api/notes') return notes(req, res, null, null);
+  if (pathname.startsWith('/api/notes/')) {
+    // /api/notes/<id> or /api/notes/<id>/tags; anything deeper is a 404.
+    const [id, sub = null, ...rest] = pathname.slice('/api/notes/'.length).split('/');
+    if (rest.length > 0) throw new HttpError(404, 'Not found');
+    return notes(req, res, id, sub);
+  }
 
   throw new HttpError(404, 'Not found');
 }

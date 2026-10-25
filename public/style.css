@@ -92,17 +92,40 @@ button:hover {
 #sidebar header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   padding: 12px;
 }
 
 .brand {
+  flex: 1;
   font-weight: 600;
   font-size: 17px;
 }
 
+button.icon {
+  padding: 2px 9px;
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+#tag-filter {
+  margin: 0 12px 8px;
+  padding: 6px 8px;
+  font: inherit;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #fff;
+}
+
 #new-note {
   margin: 0 12px 12px;
+}
+
+#list-empty {
+  margin: 0;
+  padding: 8px 12px;
+  color: #656d76;
+  font-size: 13px;
 }
 
 #note-list {
@@ -113,16 +136,33 @@ button:hover {
 }
 
 #note-list button {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   width: 100%;
   border: 0;
   border-radius: 0;
   background: none;
   padding: 8px 12px;
   text-align: left;
+}
+
+#note-list button > span {
+  display: block;
+  max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.note-date,
+.note-tags {
+  font-size: 12px;
+  color: #656d76;
+}
+
+.note-tags {
+  color: #57606a;
 }
 
 #note-list button:hover {
@@ -134,7 +174,8 @@ button:hover {
 }
 
 /* While switching notes, creating one, or logging out. */
-#app-view.busy #sidebar button {
+#app-view.busy #sidebar button,
+#app-view.busy #note-tags button {
   opacity: 0.6;
   cursor: progress;
 }
@@ -144,6 +185,88 @@ button:hover {
   flex-direction: column;
   flex: 1;
   min-width: 0;
+}
+
+/* ---- menu bar ---- */
+
+#menu-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 45px;
+  padding: 8px 16px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #fff;
+}
+
+#note-tags {
+  display: contents;
+  list-style: none;
+}
+
+#note-tags li {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px 1px 9px;
+  font-size: 13px;
+  border-radius: 999px;
+  background: #eef0ea;
+}
+
+.remove-tag {
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  padding: 0 5px;
+  font-size: 14px;
+  line-height: 1.3;
+  color: #656d76;
+}
+
+.remove-tag:hover {
+  background: #dcdcd6;
+  color: #1f2328;
+}
+
+.remove-tag:disabled {
+  cursor: progress;
+}
+
+#tag-input {
+  flex: 1;
+  min-width: 120px;
+  max-width: 220px;
+  font: inherit;
+  font-size: 13px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+}
+
+#tag-input:focus {
+  outline: none;
+  border-color: #d0d7de;
+  background: #fafaf8;
+}
+
+#tag-input[readonly] {
+  cursor: progress;
+}
+
+#tag-message {
+  margin: 0;
+  padding: 0 16px;
+  font-size: 13px;
+  color: #cf222e;
+  background: #fff;
+}
+
+#tag-message:not(:empty) {
+  padding: 4px 16px;
+  border-bottom: 1px solid #e5e7eb;
 }
 
 #note-text {

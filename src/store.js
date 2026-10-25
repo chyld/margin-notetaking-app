@@ -1,6 +1,7 @@
 'use strict';
 
-// File-based storage: users.json plus one plain-text file per note.
+// File-based storage: users.json, plus per note a plain-text file and an
+// optional JSON sidecar holding its tags.
 
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
@@ -17,16 +18,21 @@ const USERNAME_RE = /^[a-z0-9_-]{1,32}$/;
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const NOTE_ID_RE = new RegExp(`^${UUID}$`);
 const NOTE_FILE_RE = new RegExp(`^(${UUID})\\.txt$`);
+const SIDECAR_FILE_RE = new RegExp(`^(${UUID})\\.json$`);
 const TMP_FILE_RE = /\.tmp-[0-9a-f]{12}$/;
+const TAG_RE = /^[a-z0-9]{1,32}$/;
 
-const LABEL_BYTES = 4096;
-const LABEL_CHARS = 80;
+const TITLE_BYTES = 4096;
+const TITLE_CHARS = 80;
+const MAX_TAGS = 20;
+const SIDECAR_MAX_BYTES = 4096;
 const LOCK_TIMEOUT_MS = 5_000;
 const SEQ_TTL_MS = 24 * 60 * 60 * 1000;
 
 const OPEN_NOFOLLOW = fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW;
 
 class NotFound extends Error {}
+class InvalidTags extends Error {}
 
 async function syncDir(dir) {
   const fh = await fsp.open(dir, 'r');
@@ -59,15 +65,20 @@ async function writeFileAtomic(file, data) {
   await syncDir(dir);
 }
 
-// Remove temp files left behind by a crash mid-write.
+// Remove what a crash mid-write can leave behind: temp files, and tag sidecars
+// whose note was never created (creating a tagged note writes the sidecar first).
 async function sweepTempFiles() {
   const dirs = [DATA_DIR];
   for (const name of await fsp.readdir(NOTES_DIR).catch(() => [])) {
     if (USERNAME_RE.test(name)) dirs.push(path.join(NOTES_DIR, name));
   }
   for (const dir of dirs) {
-    for (const name of await fsp.readdir(dir).catch(() => [])) {
-      if (TMP_FILE_RE.test(name)) await fsp.rm(path.join(dir, name), { force: true });
+    const names = await fsp.readdir(dir).catch(() => []);
+    const present = new Set(names);
+    for (const name of names) {
+      const sidecar = SIDECAR_FILE_RE.exec(name);
+      const orphan = dir !== DATA_DIR && sidecar && !present.has(`${sidecar[1]}.txt`);
+      if (TMP_FILE_RE.test(name) || orphan) await fsp.rm(path.join(dir, name), { force: true });
     }
   }
 }
@@ -141,13 +152,30 @@ async function ensureUserDir(username) {
   await fsp.mkdir(userDir(username), { recursive: true, mode: 0o700 });
 }
 
-// The label always comes from the first LABEL_BYTES of the file, so the list
+function sidecarPath(username, id) {
+  if (!isNoteId(id)) throw new NotFound();
+  return path.join(userDir(username), `${id}.json`);
+}
+
+// The title is the first line of the first TITLE_BYTES of the file, so the list
 // and the response to a save agree. StringDecoder drops a trailing partial
-// UTF-8 character instead of producing U+FFFD.
-function makeLabel(buf) {
+// UTF-8 character instead of producing U+FFFD; the cut counts code points so a
+// character is never split.
+function makeTitle(buf) {
   const text = new StringDecoder('utf8').write(buf);
-  const line = text.split(/\r?\n/).find((l) => l.trim() !== '');
-  return line ? line.trim().slice(0, LABEL_CHARS) : 'Untitled';
+  const line = text.split('\n', 1)[0].replace(/\r$/, '').trim();
+  return line ? [...line].slice(0, TITLE_CHARS).join('') : 'Untitled';
+}
+
+// Validates a tag list from a request: an array of valid tags, at most
+// MAX_TAGS after de-duplication. Returns it de-duplicated and sorted.
+function normalizeTags(tags) {
+  if (!Array.isArray(tags) || !tags.every((t) => typeof t === 'string' && TAG_RE.test(t))) {
+    throw new InvalidTags('Tags must be 1-32 characters: lowercase letters and digits only.');
+  }
+  const unique = [...new Set(tags)].sort();
+  if (unique.length > MAX_TAGS) throw new InvalidTags(`A note can have at most ${MAX_TAGS} tags.`);
+  return unique;
 }
 
 // Opens a note without following symlinks; returns null if it isn't a regular file.
@@ -167,19 +195,56 @@ async function openNote(file) {
   return { fh, st };
 }
 
-// Reads a note's list entry, or returns null if it isn't a regular file.
+// Reads a note's title and last update, or returns null if it isn't a regular file.
 async function noteMeta(file, id) {
   const opened = await openNote(file);
   if (!opened) return null;
   const { fh, st } = opened;
   try {
-    // Only the start of the file is needed for the label.
-    const buf = Buffer.alloc(Math.min(LABEL_BYTES, st.size));
+    // Only the start of the file is needed for the title.
+    const buf = Buffer.alloc(Math.min(TITLE_BYTES, st.size));
     const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
-    return { id, label: makeLabel(buf.subarray(0, bytesRead)), mtime: st.mtimeMs };
+    return { id, title: makeTitle(buf.subarray(0, bytesRead)), mtime: st.mtimeMs };
   } finally {
     await fh.close();
   }
+}
+
+const reportedSidecars = new Set(); // bad sidecars already logged by this process
+
+// Reads a note's tags. A missing sidecar means no tags; an unusable one (not a
+// regular file, too big, bad JSON, wrong shape, invalid tag) is logged once and
+// also treated as no tags, so it can never stop the note from listing.
+async function readTags(file) {
+  let problem;
+  try {
+    const opened = await openNote(file);
+    if (!opened) {
+      const st = await fsp.lstat(file).catch(() => null);
+      if (!st) return [];
+      problem = 'not a regular file';
+    } else {
+      const { fh, st } = opened;
+      try {
+        if (st.size > SIDECAR_MAX_BYTES) {
+          problem = 'too large';
+        } else {
+          const parsed = JSON.parse(await fh.readFile('utf8'));
+          if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) problem = 'not an object';
+          else return normalizeTags(parsed.tags);
+        }
+      } finally {
+        await fh.close();
+      }
+    }
+  } catch (err) {
+    problem = err.message;
+  }
+  if (!reportedSidecars.has(file)) {
+    reportedSidecars.add(file);
+    console.error(`Ignoring tags in ${file}: ${problem}`);
+  }
+  return [];
 }
 
 async function listNotes(username) {
@@ -196,20 +261,34 @@ async function listNotes(username) {
     const match = NOTE_FILE_RE.exec(name);
     if (!match) continue;
     const meta = await noteMeta(path.join(dir, name), match[1]);
-    if (meta) notes.push(meta);
+    if (meta) notes.push({ ...meta, tags: await readTags(path.join(dir, `${match[1]}.json`)) });
   }
   notes.sort((a, b) => b.mtime - a.mtime || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return notes;
 }
 
-async function createNote(username) {
+function writeTagsFile(file, tags) {
+  return writeFileAtomic(file, JSON.stringify({ tags }) + '\n');
+}
+
+// Creates an empty note with the given (already normalized) tags. The sidecar is
+// written first and the .txt last, since the .txt is what makes the note exist:
+// a crash in between leaves only an invisible sidecar, removed at startup.
+async function createNote(username, tags = []) {
   await ensureUserDir(username);
   const id = crypto.randomUUID();
   const file = notePath(username, id);
-  await fsp.writeFile(file, '', { flag: 'wx', mode: 0o600 });
-  await syncDir(path.dirname(file));
+  const sidecar = sidecarPath(username, id);
+  if (tags.length > 0) await writeTagsFile(sidecar, tags);
+  try {
+    await fsp.writeFile(file, '', { flag: 'wx', mode: 0o600 });
+    await syncDir(path.dirname(file));
+  } catch (err) {
+    await fsp.rm(sidecar, { force: true });
+    throw err;
+  }
   const st = await fsp.stat(file);
-  return { id, label: makeLabel(Buffer.alloc(0)), mtime: st.mtimeMs };
+  return { id, title: makeTitle(Buffer.alloc(0)), mtime: st.mtimeMs, tags };
 }
 
 async function readNote(username, id) {
@@ -223,8 +302,9 @@ async function readNote(username, id) {
   }
 }
 
-// Writes to the same note run one at a time, in the order they arrive.
-const noteLocks = new Map(); // file -> tail of the queue
+// Writes to the same note (its text or its tags) run one at a time, in the
+// order they arrive. The lock is keyed by the note's .txt path for both.
+const noteLocks = new Map(); // .txt path -> tail of the queue
 
 async function withNoteLock(file, fn) {
   const prev = noteLocks.get(file) || Promise.resolve();
@@ -241,10 +321,11 @@ async function withNoteLock(file, fn) {
   }
 }
 
-// Highest save number applied per (note, browser tab). A tab numbers its saves,
-// so if an older save from the same tab arrives after a newer one it is skipped.
-// Saves from different tabs aren't compared: the most recent one wins.
-const lastSeq = new Map(); // `${file}\0${writer}` -> { seq, at }
+// Highest save number applied per (note, browser tab, kind). A tab numbers its
+// saves, so if an older save from the same tab arrives after a newer one it is
+// skipped. Text and tag saves are numbered separately. Saves from different
+// tabs aren't compared: the most recent one wins.
+const lastSeq = new Map(); // `${file}\0${kind}\0${writer}` -> { seq, at }
 
 setInterval(() => {
   const cutoff = Date.now() - SEQ_TTL_MS;
@@ -253,14 +334,14 @@ setInterval(() => {
   }
 }, 60 * 60 * 1000).unref();
 
-// Overwrites an existing note. Notes are only ever created by createNote.
-// Returns the note's list entry, with `stale: true` if the write was skipped.
+// Overwrites an existing note's text. Notes are only ever created by createNote.
+// Returns { id, title, mtime }, with `stale: true` if the write was skipped.
 async function writeNote(username, id, text, { writer, seq } = {}) {
   const file = notePath(username, id);
   return withNoteLock(file, async () => {
     const st = await fsp.lstat(file).catch(() => null);
     if (!st || !st.isFile()) throw new NotFound();
-    const key = writer && `${file}\0${writer}`;
+    const key = writer && `${file}\0text\0${writer}`;
     if (key) {
       const last = lastSeq.get(key);
       if (last && seq <= last.seq) return { ...(await noteMeta(file, id)), stale: true };
@@ -274,12 +355,35 @@ async function writeNote(username, id, text, { writer, seq } = {}) {
   });
 }
 
+// Replaces a note's tags (already normalized). Returns { id, tags }, with
+// `stale: true` and the current tags if the write was skipped.
+async function writeTags(username, id, tags, { writer, seq } = {}) {
+  const file = notePath(username, id);
+  const sidecar = sidecarPath(username, id);
+  return withNoteLock(file, async () => {
+    // Never write a sidecar for a note that doesn't exist.
+    const st = await fsp.lstat(file).catch(() => null);
+    if (!st || !st.isFile()) throw new NotFound();
+    const key = writer && `${file}\0tags\0${writer}`;
+    if (key) {
+      const last = lastSeq.get(key);
+      if (last && seq <= last.seq) return { id, tags: await readTags(sidecar), stale: true };
+    }
+    await writeTagsFile(sidecar, tags);
+    reportedSidecars.delete(sidecar);
+    if (key) lastSeq.set(key, { seq, at: Date.now() });
+    return { id, tags };
+  });
+}
+
 module.exports = {
   DATA_DIR,
   NOTES_DIR,
   USERNAME_RE,
   NotFound,
+  InvalidTags,
   isNoteId,
+  normalizeTags,
   writeFileAtomic,
   sweepTempFiles,
   readUsers,
@@ -290,4 +394,5 @@ module.exports = {
   createNote,
   readNote,
   writeNote,
+  writeTags,
 };

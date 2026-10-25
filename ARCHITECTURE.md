@@ -17,6 +17,9 @@ Decisions from the user:
 - Same note open in two tabs: the most recent save wins.
 - Full network access on port 5555, plain HTTP.
 
+v2 adds a collapsible sidebar, titles, update dates and tags; see SPEC-v2.md
+for the full spec and its decisions.
+
 ## Overview
 
 One container, one Node.js process, zero npm dependencies. The server serves a
@@ -51,12 +54,20 @@ browser ──HTTP :5555──> margin container (node:22-alpine, non-root, read
   users.json              # { "<username>": { salt, hash, N, r, p, keylen } }, 0600
   users.lock/             # exists only while the CLI is writing users.json
   notes/<username>/<uuid>.txt   # one UTF-8 plain-text file per note, 0600
+  notes/<username>/<uuid>.json  # optional tags sidecar: {"tags": [...]}, 0600
 ```
 
 - The process umask is `077`: directories are `0700`, files `0600`.
 - **Note ID** is a random UUID v4. The note body is the whole file.
-- **Label** is the first non-empty line (trimmed, max 80 chars) of the first
-  4 KB of the file, or "Untitled". The list and save responses use the same code.
+- **Title** is the first line of the first 4 KB of the file (trimmed, max 80
+  code points), or "Untitled" if it's blank. The list and save responses use
+  the same code.
+- **Tags** live in `<uuid>.json`: unique, sorted, each `^[a-z0-9]{1,32}$`, at
+  most 20. Missing file = no tags; an unusable file (symlink, > 4 KB, bad JSON
+  or shape, invalid tag) is logged once and treated as no tags. Text and tag
+  writes for a note share one lock (keyed by the `.txt` path). Tag writes never
+  touch the `.txt` mtime. A tagged note is created sidecar first, `.txt` last;
+  orphan sidecars are removed at startup.
 - **Order** is file mtime, newest first, ties broken by ID.
 - **Atomic writes:** write `.<name>.tmp-<random>` (`O_EXCL`, `0600`) in the same
   directory, `fsync`, `rename` over the target, `fsync` the directory. Leftover
@@ -109,10 +120,11 @@ mapped onto the filesystem.
 |--------|-----------------|----------------------------------------------------------------|
 | POST   | /api/login      | JSON `{username, password}`, body ≤ 4 KB → `{username}` + cookie |
 | POST   | /api/logout     | clears cookie → 204                                            |
-| GET    | /api/notes      | `[{id, label, mtime}]`, newest first                           |
-| POST   | /api/notes      | creates an empty note → 201 `{id, label, mtime}`               |
+| GET    | /api/notes      | `[{id, title, mtime, tags}]`, newest first                     |
+| POST   | /api/notes      | optional JSON `{tags}` ≤ 4 KB → 201 `{id, title, mtime, tags}` |
 | GET    | /api/notes/:id  | `text/plain; charset=utf-8`                                    |
-| PUT    | /api/notes/:id  | `text/plain` body ≤ 1 MB → `{id, label, mtime[, stale]}`; 404 if absent |
+| PUT    | /api/notes/:id  | `text/plain` body ≤ 1 MB → `{id, title, mtime[, stale]}`; 404 if absent |
+| PUT    | /api/notes/:id/tags | JSON `{tags}` (required) ≤ 4 KB → `{id, tags[, stale]}`; 404 if absent |
 
 - `:id` must fully match the UUID v4 pattern, otherwise 404. 405s include `Allow`.
 - **Save order:** writes to one note run one at a time in arrival order. A PUT
@@ -120,7 +132,10 @@ mapped onto the filesystem.
   per tab); a PUT whose number is not higher than the last one written from the
   same tab for that note is skipped (`stale: true`). A number only counts once
   its write has succeeded. A failed write removes its temp file. Tabs aren't compared with
-  each other, so across tabs the most recent save wins.
+  each other, so across tabs the most recent save wins. Tag saves are numbered
+  separately from text saves.
+- Tag sets are validated before anything is written (400). JSON bodies need
+  `Content-Type: application/json` (415).
 - Body limits are enforced while streaming (413, connection closed).
 - State-changing requests are refused (403) if `Sec-Fetch-Site` is cross-site
   or `Origin` doesn't match `Host`. Login requires `application/json`.
@@ -131,10 +146,20 @@ mapped onto the filesystem.
 ## Frontend
 
 - On load, `GET /api/notes`: 401 shows the login form, 200 shows the app.
-- **Left:** "Margin", "Log out", "New note", then the note list (labels are set
-  with `textContent`, never HTML).
-- **Right:** a `<textarea>`; disabled until a note is selected or created.
-  A status line shows Unsaved changes / Saving… / Saved / Not saved.
+- **Left (collapsible):** « toggle, "Margin", "Log out", the tag filter, "New
+  note", then the note list: title, update date/time, tags (all set with
+  `textContent`, never HTML). Collapsed state is kept in localStorage.
+- **Right:** a menu bar (» toggle when collapsed, the note's tags with ×, an
+  add-tag input, a tag message line), then a `<textarea>`; disabled until a
+  note is selected or created. A status line shows Unsaved changes / Saving… /
+  Saved / Not saved.
+- **Tags** save immediately, one at a time, with `keepalive`. Text-save
+  responses update only title/mtime and tag-save responses only tags. Tag
+  controls are locked while a tag save or a switch runs; switching waits for a
+  tag save. A failed save the server definitely didn't apply reverts; one of
+  unknown outcome re-reads the tags from the server.
+- **Filter:** "All notes" plus every tag; resets if its tag disappears, and on
+  login/logout. New note while filtering gets the selected tag.
 - **Autosave:** 500 ms after typing stops, when switching notes, creating a
   note, logging out, or hiding the tab. Saves are chained so only one is in
   flight. "Unsaved" means the editor differs from the text the server last
@@ -150,4 +175,4 @@ mapped onto the filesystem.
   and creating stop, and logout asks for confirmation.
 - **Failed saves** show the error and retry every 3 s, except 401 (logged out)
   and 413 (over 1 MB), which say what to do.
-- After each save the list label and order update.
+- After each save the list title and order update.

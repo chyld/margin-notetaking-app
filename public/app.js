@@ -5,33 +5,55 @@ const RETRY_DELAY_MS = 3000;
 const REQUEST_TIMEOUT_MS = 30_000;
 // Browsers refuse keepalive requests whose bodies total more than 64 KiB.
 const KEEPALIVE_MAX_BYTES = 60 * 1024;
+const TAG_RE = /^[a-z0-9]{1,32}$/;
+const MAX_TAGS = 20;
+const SIDEBAR_KEY = 'margin.sidebarCollapsed';
+const DATE_FORMAT = { dateStyle: 'medium', timeStyle: 'short' };
 
 const els = {
   loginView: document.getElementById('login-view'),
   loginForm: document.getElementById('login-form'),
   loginError: document.getElementById('login-error'),
   appView: document.getElementById('app-view'),
+  sidebar: document.getElementById('sidebar'),
+  collapse: document.getElementById('collapse'),
+  expand: document.getElementById('expand'),
   logout: document.getElementById('logout'),
+  filter: document.getElementById('tag-filter'),
   newNote: document.getElementById('new-note'),
   list: document.getElementById('note-list'),
+  listEmpty: document.getElementById('list-empty'),
+  noteTags: document.getElementById('note-tags'),
+  tagInput: document.getElementById('tag-input'),
+  tagMessage: document.getElementById('tag-message'),
   text: document.getElementById('note-text'),
   status: document.getElementById('status'),
 };
 
-let notes = []; // [{ id, label, mtime }], newest first
+let notes = []; // [{ id, title, mtime, tags }], newest first
 let currentId = null;
 let savedText = ''; // the current note's text as last confirmed by the server
 let saving = false; // a save is in flight; its text isn't confirmed yet
 let saveTimer = null;
 let saveChain = Promise.resolve(true);
 let busy = false; // a switch, create, or logout is in progress
+let filterTag = ''; // '' means all notes
+let filterOptionsKey = null; // the tag set the dropdown was last built from
+
+// Tag saves run one at a time. While one is in flight the menu bar shows the
+// tags being saved; afterwards it shows the note's saved tags again.
+let tagSave = null; // { id, tags } while a tag save is in flight
+let tagChain = Promise.resolve();
+let tagsReloading = false; // re-reading tags after a tag save of unknown outcome
 
 // Every save carries this tab's id and an increasing number, so the server can
-// skip an older save from this tab that arrives after a newer one.
+// skip an older save from this tab that arrives after a newer one. Text and
+// tag saves are numbered separately.
 const writerId = [...crypto.getRandomValues(new Uint8Array(16))]
   .map((b) => b.toString(16).padStart(2, '0'))
   .join('');
 let saveSeq = 0;
+let tagSeq = 0;
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -41,7 +63,7 @@ class ApiError extends Error {
 }
 
 // Requests time out so a stalled connection can't leave the app stuck.
-async function api(method, url, { body, type, headers = {} } = {}) {
+async function api(method, url, { body, type, headers = {}, keepalive = false } = {}) {
   let res;
   try {
     res = await fetch(url, {
@@ -49,6 +71,7 @@ async function api(method, url, { body, type, headers = {} } = {}) {
       body,
       headers: { ...(type ? { 'Content-Type': type } : {}), ...headers },
       credentials: 'same-origin',
+      keepalive,
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
@@ -66,9 +89,21 @@ function setStatus(message, isError = false) {
   els.status.classList.toggle('error', isError);
 }
 
+function setTagMessage(message) {
+  els.tagMessage.textContent = message;
+}
+
 function showError(err) {
   if (err.status === 401) return showLogin();
   setStatus(err.message || 'Something went wrong.', true);
+}
+
+function byNewest(a, b) {
+  return b.mtime - a.mtime || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+function findNote(id) {
+  return notes.find((n) => n.id === id);
 }
 
 // A save still in flight counts as unsaved: the editor may have been changed
@@ -86,17 +121,63 @@ function openNote(id, rawText) {
   els.text.value = text;
   els.text.disabled = false;
   setStatus('');
+  setTagMessage('');
+  renderTags();
 }
+
+// ---- sidebar collapse ----------------------------------------------------
+
+function setCollapsed(collapsed, { persist = true } = {}) {
+  els.sidebar.hidden = collapsed;
+  els.expand.hidden = !collapsed;
+  els.collapse.setAttribute('aria-expanded', String(!collapsed));
+  els.expand.setAttribute('aria-expanded', String(!collapsed));
+  if (!persist) return;
+  try {
+    if (collapsed) localStorage.setItem(SIDEBAR_KEY, '1');
+    else localStorage.removeItem(SIDEBAR_KEY);
+  } catch {
+    // Storage unavailable: the state just isn't remembered.
+  }
+}
+
+function storedCollapsed() {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+els.collapse.addEventListener('click', () => {
+  setCollapsed(true);
+  els.expand.focus();
+});
+els.expand.addEventListener('click', () => {
+  setCollapsed(false);
+  els.collapse.focus();
+});
 
 // ---- views ---------------------------------------------------------------
 
-function showLogin(message = '') {
+function resetState() {
   clearTimeout(saveTimer);
   notes = [];
   currentId = null;
   savedText = '';
   saving = false;
+  tagSave = null;
+  tagsReloading = false;
+  filterTag = '';
+  filterOptionsKey = null;
   els.text.value = '';
+  els.text.disabled = true;
+  setStatus('');
+  setTagMessage('');
+}
+
+function showLogin(message = '') {
+  resetState();
   els.appView.hidden = true;
   els.loginView.hidden = false;
   els.loginForm.reset();
@@ -105,40 +186,109 @@ function showLogin(message = '') {
 }
 
 function showApp(list) {
-  notes = list;
-  currentId = null;
-  savedText = '';
-  els.text.value = '';
-  els.text.disabled = true;
+  resetState();
+  notes = list.sort(byNewest);
   els.loginView.hidden = true;
   els.appView.hidden = false;
-  setStatus('');
   renderList();
+  renderTags();
+}
+
+// Rebuilds the filter options only when the set of tags changes, so an
+// autosave never disturbs the dropdown. A selected tag that no longer exists
+// resets the filter to all notes.
+function renderFilter() {
+  const all = new Set();
+  for (const note of notes) for (const tag of note.tags) all.add(tag);
+  const tags = [...all].sort();
+  if (filterTag && !all.has(filterTag)) filterTag = '';
+  const key = tags.join(' ');
+  if (key !== filterOptionsKey) {
+    filterOptionsKey = key;
+    const options = tags.map((tag) => {
+      const option = document.createElement('option');
+      option.value = tag;
+      option.textContent = `#${tag}`;
+      return option;
+    });
+    els.filter.replaceChildren(els.filter.options[0], ...options);
+  }
+  els.filter.value = filterTag;
+  els.filter.disabled = tags.length === 0;
 }
 
 function renderList() {
-  const items = notes.map((note) => {
+  renderFilter();
+  const shown = filterTag ? notes.filter((n) => n.tags.includes(filterTag)) : notes;
+  const items = shown.map((note) => {
     const li = document.createElement('li');
     const button = document.createElement('button');
     button.type = 'button';
-    button.textContent = note.label; // note text is never treated as HTML
-    button.title = note.label;
+    // Note text and tags are never treated as HTML.
+    const title = document.createElement('span');
+    title.className = 'note-title';
+    title.textContent = note.title;
+    const date = document.createElement('span');
+    date.className = 'note-date';
+    date.textContent = new Date(note.mtime).toLocaleString(undefined, DATE_FORMAT);
+    button.append(title, date);
+    if (note.tags.length > 0) {
+      const tags = document.createElement('span');
+      tags.className = 'note-tags';
+      tags.textContent = note.tags.map((t) => `#${t}`).join(' ');
+      button.append(tags);
+    }
+    button.title = note.title;
     if (note.id === currentId) button.setAttribute('aria-current', 'true');
     button.addEventListener('click', () => selectNote(note.id));
     li.append(button);
     return li;
   });
   els.list.replaceChildren(...items);
+  els.listEmpty.hidden = shown.length > 0;
 }
 
-function updateNote(meta) {
-  notes = notes.filter((n) => n.id !== meta.id);
-  notes.push({ id: meta.id, label: meta.label, mtime: meta.mtime });
-  notes.sort((a, b) => b.mtime - a.mtime || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+// Updates only the given fields of a note's list entry: text saves set
+// title/mtime, tag saves set tags, so neither can undo the other's result.
+function updateNote(id, fields) {
+  const note = findNote(id);
+  if (!note) return;
+  Object.assign(note, fields);
+  notes.sort(byNewest);
   renderList();
 }
 
-// ---- saving --------------------------------------------------------------
+function tagsLocked() {
+  return busy || tagSave !== null || tagsReloading;
+}
+
+// The menu bar shows the tags being saved while a tag save is in flight,
+// otherwise the open note's saved tags.
+function renderTags() {
+  const note = currentId === null ? null : findNote(currentId);
+  const tags = tagSave && tagSave.id === currentId ? tagSave.tags : note ? note.tags : [];
+  const locked = tagsLocked();
+  const items = tags.map((tag) => {
+    const li = document.createElement('li');
+    const label = document.createElement('span');
+    label.textContent = `#${tag}`;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'remove-tag';
+    remove.textContent = '×';
+    remove.setAttribute('aria-label', `Remove tag ${tag}`);
+    remove.disabled = locked;
+    remove.addEventListener('click', () => removeTag(tag));
+    li.append(label, remove);
+    return li;
+  });
+  els.noteTags.replaceChildren(...items);
+  els.tagInput.disabled = currentId === null;
+  // Read-only rather than disabled, so the input keeps focus between tags.
+  els.tagInput.readOnly = locked;
+}
+
+// ---- saving text ---------------------------------------------------------
 
 // Saves are chained so only one request is in flight at a time and they can
 // never arrive out of order. Resolves to false if the save failed.
@@ -163,7 +313,7 @@ async function saveNow() {
     });
     const meta = await res.json();
     saving = false;
-    updateNote(meta);
+    updateNote(id, { title: meta.title, mtime: meta.mtime });
     if (id !== currentId) return true;
     if (meta.stale) {
       // A newer save from this tab (the page-close save) got there first, so
@@ -228,24 +378,122 @@ window.addEventListener('beforeunload', (event) => {
   if (hasUnsaved() && new Blob([els.text.value]).size > KEEPALIVE_MAX_BYTES) event.preventDefault();
 });
 
+// ---- saving tags ---------------------------------------------------------
+
+// Replaces the note's tags. keepalive (the body is tiny) lets a change made
+// just before the tab closes still reach the server.
+function saveTags(id, tags) {
+  tagSave = { id, tags };
+  renderTags();
+  tagChain = (async () => {
+    try {
+      const res = await api('PUT', `/api/notes/${id}/tags`, {
+        body: JSON.stringify({ tags }),
+        type: 'application/json',
+        headers: { 'X-Margin-Writer': writerId, 'X-Margin-Seq': String(++tagSeq) },
+        keepalive: true,
+      });
+      const meta = await res.json();
+      updateNote(id, { tags: meta.tags }); // also covers stale: the server's current tags
+      if (id === currentId) setTagMessage('');
+    } catch (err) {
+      const here = id === currentId;
+      if (err.status === 401) {
+        if (here) setTagMessage('Tag not saved: you have been logged out.');
+      } else if ([400, 404, 413, 415].includes(err.status)) {
+        // The server wrote nothing, so the saved tags are still right.
+        if (here) setTagMessage(`Tag not saved: ${err.message}`);
+      } else {
+        // The change may or may not have been saved: ask the server.
+        await reloadTags(id);
+      }
+    } finally {
+      tagSave = null;
+      renderTags();
+    }
+  })();
+  return tagChain;
+}
+
+async function reloadTags(id) {
+  tagsReloading = true;
+  renderTags();
+  try {
+    const list = await (await api('GET', '/api/notes')).json();
+    const fresh = list.find((n) => n.id === id);
+    if (fresh) updateNote(id, { tags: fresh.tags });
+    if (id === currentId) setTagMessage("Couldn't confirm the tag change. Showing the saved tags.");
+  } catch {
+    if (id === currentId) setTagMessage("Couldn't confirm the tag change. Reload the page to see the saved tags.");
+  } finally {
+    tagsReloading = false;
+  }
+}
+
+function addTag() {
+  if (currentId === null || tagsLocked()) return;
+  let tag = els.tagInput.value.trim();
+  if (tag.startsWith('#')) tag = tag.slice(1);
+  tag = tag.toLowerCase();
+  if (tag === '') return;
+  if (!TAG_RE.test(tag)) {
+    setTagMessage(
+      [...tag].length > 32
+        ? 'A tag can be at most 32 characters.'
+        : 'Tags can only contain letters a-z and digits 0-9 (no spaces).',
+    );
+    return;
+  }
+  const tags = findNote(currentId).tags;
+  els.tagInput.value = '';
+  setTagMessage('');
+  if (tags.includes(tag)) return;
+  if (tags.length >= MAX_TAGS) {
+    els.tagInput.value = tag;
+    setTagMessage(`A note can have at most ${MAX_TAGS} tags.`);
+    return;
+  }
+  saveTags(currentId, [...tags, tag].sort());
+}
+
+function removeTag(tag) {
+  if (currentId === null || tagsLocked()) return;
+  setTagMessage('');
+  saveTags(
+    currentId,
+    findNote(currentId).tags.filter((t) => t !== tag),
+  );
+}
+
+els.tagInput.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  addTag();
+});
+
 // ---- actions -------------------------------------------------------------
 
 // Runs one switch/create/logout at a time; clicks made meanwhile are ignored.
-// The editor is read-only throughout, so no keystrokes land on the wrong note.
-// `fn` receives whether the current note was saved.
+// The editor and tag controls are locked throughout, so nothing lands on the
+// wrong note. It waits for the text save and any tag save; `fn` receives
+// whether the text was saved.
 async function exclusive(fn) {
   if (busy) return;
   busy = true;
   els.text.readOnly = true;
   els.appView.classList.add('busy');
+  renderTags();
   try {
-    await fn(await save());
+    const saved = await save();
+    await tagChain;
+    await fn(saved);
   } catch (err) {
     showError(err);
   } finally {
     busy = false;
     els.text.readOnly = false;
     els.appView.classList.remove('busy');
+    renderTags();
   }
 }
 
@@ -260,13 +508,18 @@ function selectNote(id) {
   });
 }
 
+// With a tag selected in the filter, the new note gets that tag.
 function createNote() {
   return exclusive(async (saved) => {
     if (!saved) return;
-    const res = await api('POST', '/api/notes');
+    const res = filterTag
+      ? await api('POST', '/api/notes', { body: JSON.stringify({ tags: [filterTag] }), type: 'application/json' })
+      : await api('POST', '/api/notes');
     const meta = await res.json();
+    notes.push({ id: meta.id, title: meta.title, mtime: meta.mtime, tags: meta.tags });
+    notes.sort(byNewest);
     openNote(meta.id, '');
-    updateNote(meta);
+    renderList();
     els.text.focus();
   });
 }
@@ -300,8 +553,13 @@ async function login(event) {
 els.loginForm.addEventListener('submit', login);
 els.newNote.addEventListener('click', createNote);
 els.logout.addEventListener('click', logout);
+els.filter.addEventListener('change', () => {
+  filterTag = els.filter.value;
+  renderList();
+});
 
 async function boot() {
+  setCollapsed(storedCollapsed(), { persist: false });
   try {
     const res = await api('GET', '/api/notes');
     showApp(await res.json());
