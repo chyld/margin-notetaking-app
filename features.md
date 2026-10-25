@@ -7,6 +7,15 @@
 - New note button
 - Empty notes are fine
 
+## Formatting
+
+- Color highlighter, bold, underline
+- Written inline as `=={options}text==`, options joined with `+`:
+  - a color: `=={green}wrist exercises==`, `=={amber-deep}computer that yells at you==`
+  - bold: `=={b}together==`
+  - underline: `=={u}duplicates==`
+  - combined: `=={lime+b+u}yearbook==`
+
 ## Saving
 
 - Saved only on demand (no autosave)
