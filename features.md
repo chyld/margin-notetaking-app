@@ -60,6 +60,12 @@
   - a vertical bar in its color runs down the left of the section's content
 - In raw mode the heading line is shown as written
 
+## Screenshots
+
+- Screenshots can be added to notes
+- Stored as PNG
+- Each note is stored in its own folder, together with its screenshots
+
 ## End of file marker
 
 - An end of file marker at the bottom of the note: a thin grey line
@@ -111,6 +117,7 @@
 - Called Margin
 - Docker Compose
 - No database; everything is stored in files
+- Each note has its own folder (its text, tags and screenshots)
 - Full network access on port 5555, plain HTTP
 - README with install and setup instructions
 - Favicon
