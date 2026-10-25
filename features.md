@@ -40,10 +40,11 @@
   | `fuchsia` | `#ffd3fe` | `#eb9fe8` |
   | `pink`    | `#ffd0e7` | `#ff99c2` |
 
-- Render mode example: the raw todo list above shows "computer that yells
-  at you" on deep amber, "yearbook" bold and underlined on light lime, "wrist
-  exercises" on light green, "together" bold and "duplicates" underlined.
-  Highlights have rounded corners; the text keeps the note's monospace font.
+- Render mode example: the formatting examples above show "computer that
+  yells at you" on deep amber, "yearbook" bold and underlined on light lime,
+  "wrist exercises" on light green, "together" bold and "duplicates"
+  underlined. Highlights have rounded corners; the text keeps the note's
+  monospace font.
 
 ## Saving
 
