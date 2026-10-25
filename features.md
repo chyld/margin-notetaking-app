@@ -23,20 +23,27 @@
   - **Remove colour**
   - a grid of color swatches, each showing a sample "a"
   - hint at the bottom: "Enter applies · Esc closes"
-- 10 highlight colors:
+- 24 highlight colors: 12 hues, each light (`<hue>`) and deep (`<hue>-deep`):
 
-  | Name         | Color     |
-  |--------------|-----------|
-  | `yellow`     | `#fff3a3` |
-  | `amber`      | `#ffe08a` |
-  | `amber-deep` | `#ffc94d` |
-  | `orange`     | `#ffd2a8` |
-  | `red`        | `#ffc2c2` |
-  | `pink`       | `#ffc8e6` |
-  | `purple`     | `#e2d1ff` |
-  | `blue`       | `#c8e0ff` |
-  | `green`      | `#c6f0c9` |
-  | `lime`       | `#def7a6` |
+  | Hue       | Light     | Deep      |
+  |-----------|-----------|-----------|
+  | `red`     | `#ffd2cc` | `#ff9b93` |
+  | `orange`  | `#ffd7b8` | `#ffa46e` |
+  | `amber`   | `#ffdfac` | `#ebb353` |
+  | `lime`    | `#d9eeb7` | `#aacc6b` |
+  | `green`   | `#c2f3cb` | `#7cd590` |
+  | `emerald` | `#b2f5dd` | `#53d8b1` |
+  | `teal`    | `#a8f5f4` | `#2ad7d7` |
+  | `sky`     | `#b0efff` | `#4fcdff` |
+  | `blue`    | `#c9e6ff` | `#8fbdff` |
+  | `violet`  | `#e7dbff` | `#c4acff` |
+  | `fuchsia` | `#ffd3fe` | `#eb9fe8` |
+  | `pink`    | `#ffd0e7` | `#ff99c2` |
+
+- Render mode example: the raw todo list above shows "computer that yells
+  at you" on deep amber, "yearbook" bold and underlined on light lime, "wrist
+  exercises" on light green, "together" bold and "duplicates" underlined.
+  Highlights have rounded corners; the text keeps the note's monospace font.
 
 ## Saving
 
