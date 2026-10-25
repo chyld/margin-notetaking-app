@@ -2,7 +2,7 @@
 
 ## Notes
 
-- Plain text only (no markdown)
+- Plain text with formatting (like markdown)
 - A note's title is its first line
 - New note button
 - Empty notes are fine
@@ -15,6 +15,24 @@
   - bold: `=={b}together==`
   - underline: `=={u}duplicates==`
   - combined: `=={lime+b+u}yearbook==`
+- Two modes:
+  - Raw mode: you see all the raw formatting
+  - Render mode: you just see the colors, underline and bold
+- A menu bar with the formatting options
+- 10 highlight colors:
+
+  | Name         | Color     |
+  |--------------|-----------|
+  | `yellow`     | `#fff3a3` |
+  | `amber`      | `#ffe08a` |
+  | `amber-deep` | `#ffc94d` |
+  | `orange`     | `#ffd2a8` |
+  | `red`        | `#ffc2c2` |
+  | `pink`       | `#ffc8e6` |
+  | `purple`     | `#e2d1ff` |
+  | `blue`       | `#c8e0ff` |
+  | `green`      | `#c6f0c9` |
+  | `lime`       | `#def7a6` |
 
 ## Saving
 
