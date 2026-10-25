@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Margin</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main id="login-view" hidden>
+      <form id="login-form">
+        <h1>Margin</h1>
+        <label>
+          Username
+          <input name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+        </label>
+        <label>
+          Password
+          <input name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <button type="submit">Log in</button>
+        <p id="login-error" role="alert"></p>
+      </form>
+    </main>
+
+    <div id="app-view" hidden>
+      <aside id="sidebar">
+        <header>
+          <span class="brand">Margin</span>
+          <button id="logout" type="button">Log out</button>
+        </header>
+        <button id="new-note" type="button">New note</button>
+        <ul id="note-list"></ul>
+      </aside>
+      <section id="editor">
+        <textarea id="note-text" disabled spellcheck="false" placeholder="Select a note or create a new one."></textarea>
+        <div id="status" aria-live="polite"></div>
+      </section>
+    </div>
+  </body>
+</html>

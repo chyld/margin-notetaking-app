@@ -1,0 +1,13 @@
+{
+  "name": "margin",
+  "version": "1.0.0",
+  "description": "Margin: a plain-text notetaking app",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

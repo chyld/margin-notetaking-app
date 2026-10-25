@@ -1,0 +1,169 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #1f2328;
+  background: #fafaf8;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #fff;
+  padding: 6px 12px;
+}
+
+button:hover {
+  background: #f3f4f6;
+}
+
+/* ---- login ---- */
+
+#login-view {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+#login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 280px;
+}
+
+#login-form h1 {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+#login-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#login-form input {
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+}
+
+#login-error {
+  min-height: 1.5em;
+  margin: 0;
+  color: #cf222e;
+}
+
+/* ---- notes ---- */
+
+#app-view {
+  display: flex;
+  height: 100%;
+}
+
+#sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 280px;
+  flex-shrink: 0;
+  border-right: 1px solid #e5e7eb;
+  background: #f3f3f0;
+}
+
+#sidebar header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.brand {
+  font-weight: 600;
+  font-size: 17px;
+}
+
+#new-note {
+  margin: 0 12px 12px;
+}
+
+#note-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+}
+
+#note-list button {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  padding: 8px 12px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#note-list button:hover {
+  background: #e8e8e4;
+}
+
+#note-list button[aria-current="true"] {
+  background: #dcdcd6;
+}
+
+#editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+#note-text {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  outline: none;
+  resize: none;
+  padding: 20px 24px;
+  font: 15px/1.6 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  background: #fff;
+  color: inherit;
+}
+
+#note-text:disabled {
+  background: #fafaf8;
+}
+
+#status {
+  min-height: 28px;
+  padding: 4px 24px;
+  font-size: 13px;
+  color: #656d76;
+  border-top: 1px solid #e5e7eb;
+}
+
+#status.error {
+  color: #cf222e;
+}
