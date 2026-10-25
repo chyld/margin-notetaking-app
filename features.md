@@ -33,7 +33,7 @@
   | `amber`   | `#ffdfac` | `#ebb353` |
   | `lime`    | `#d9eeb7` | `#aacc6b` |
   | `green`   | `#c2f3cb` | `#7cd590` |
-  | `emerald` | `#b2f5dd` | `#53d8b1` |
+  | `mint`    | `#b2f5dd` | `#53d8b1` |
   | `teal`    | `#a8f5f4` | `#2ad7d7` |
   | `sky`     | `#b0efff` | `#4fcdff` |
   | `blue`    | `#c9e6ff` | `#8fbdff` |
@@ -46,6 +46,19 @@
   "wrist exercises" on light green, "together" bold and "duplicates"
   underlined. Highlights have rounded corners; the text keeps the note's
   monospace font.
+
+## Sections
+
+- Collapsible sections, started by a heading line `## {color} Heading`:
+  - `## {green-deep} Notes App`
+  - `## {amber} Done`
+- A section runs from its heading to the next `##` heading (or the end of
+  the note)
+- In render mode:
+  - a ⌄ toggle before the heading collapses and expands the section
+  - the heading is shown larger, in a dark shade of its color
+  - a vertical bar in its color runs down the left of the section's content
+- In raw mode the heading line is shown as written
 
 ## Saving
 
