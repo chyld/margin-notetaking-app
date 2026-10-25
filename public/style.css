@@ -133,6 +133,12 @@ button:hover {
   background: #dcdcd6;
 }
 
+/* While switching notes, creating one, or logging out. */
+#app-view.busy #sidebar button {
+  opacity: 0.6;
+  cursor: progress;
+}
+
 #editor {
   display: flex;
   flex-direction: column;

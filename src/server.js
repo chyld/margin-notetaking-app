@@ -163,7 +163,10 @@ function reserveLoginAttempt(ip, username) {
   for (const [key, max] of limits) {
     const entry = loginAttempts.get(key);
     if (entry && now - entry.first > LOGIN_WINDOW_MS) loginAttempts.delete(key);
-    else if (entry && entry.count >= max) throw new HttpError(429, 'Too many failed attempts. Try again later.');
+    else if (entry && entry.count >= max) {
+      const wait = Math.ceil((entry.first + LOGIN_WINDOW_MS - now) / 1000);
+      throw new HttpError(429, 'Too many failed attempts. Try again later.', { 'Retry-After': String(wait) });
+    }
   }
   const keys = limits.map(([key]) => key);
   for (const key of keys) {

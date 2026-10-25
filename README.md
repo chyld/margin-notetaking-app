@@ -13,10 +13,12 @@ docker compose up -d --build
 Margin is then available on port 5555 of this machine, e.g. `http://localhost:5555`.
 
 The container runs as UID/GID 1000 by default so files in `./data` stay owned by
-you. If your user has a different ID:
+you. If your user has a different ID (check with `id -u`), write it to `.env`
+before starting, so every `docker compose` command (including the CLI below)
+uses it:
 
 ```sh
-MARGIN_UID=$(id -u) MARGIN_GID=$(id -g) docker compose up -d --build
+printf 'MARGIN_UID=%s\nMARGIN_GID=%s\n' "$(id -u)" "$(id -g)" > .env
 ```
 
 ## Create a user

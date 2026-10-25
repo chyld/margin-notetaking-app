@@ -44,14 +44,15 @@ async function writeFileAtomic(file, data) {
   const tmp = path.join(dir, `.${path.basename(file)}.tmp-${crypto.randomBytes(6).toString('hex')}`);
   const fh = await fsp.open(tmp, 'wx', 0o600);
   try {
-    await fh.writeFile(data);
-    await fh.sync();
-  } finally {
-    await fh.close();
-  }
-  try {
+    try {
+      await fh.writeFile(data);
+      await fh.sync();
+    } finally {
+      await fh.close();
+    }
     await fsp.rename(tmp, file);
   } catch (err) {
+    // Don't leave a partial temp file behind (e.g. disk full), or retries pile them up.
     await fsp.rm(tmp, { force: true });
     throw err;
   }
@@ -197,7 +198,7 @@ async function listNotes(username) {
     const meta = await noteMeta(path.join(dir, name), match[1]);
     if (meta) notes.push(meta);
   }
-  notes.sort((a, b) => b.mtime - a.mtime || a.id.localeCompare(b.id));
+  notes.sort((a, b) => b.mtime - a.mtime || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return notes;
 }
 
@@ -259,13 +260,14 @@ async function writeNote(username, id, text, { writer, seq } = {}) {
   return withNoteLock(file, async () => {
     const st = await fsp.lstat(file).catch(() => null);
     if (!st || !st.isFile()) throw new NotFound();
-    if (writer) {
-      const key = `${file}\0${writer}`;
+    const key = writer && `${file}\0${writer}`;
+    if (key) {
       const last = lastSeq.get(key);
       if (last && seq <= last.seq) return { ...(await noteMeta(file, id)), stale: true };
-      lastSeq.set(key, { seq, at: Date.now() });
     }
     await writeFileAtomic(file, text);
+    // Only a save that was actually written counts, so a failed one can be retried.
+    if (key) lastSeq.set(key, { seq, at: Date.now() });
     const meta = await noteMeta(file, id);
     if (!meta) throw new NotFound();
     return meta;

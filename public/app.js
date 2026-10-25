@@ -2,6 +2,7 @@
 
 const SAVE_DELAY_MS = 500;
 const RETRY_DELAY_MS = 3000;
+const REQUEST_TIMEOUT_MS = 30_000;
 // Browsers refuse keepalive requests whose bodies total more than 64 KiB.
 const KEEPALIVE_MAX_BYTES = 60 * 1024;
 
@@ -20,6 +21,7 @@ const els = {
 let notes = []; // [{ id, label, mtime }], newest first
 let currentId = null;
 let savedText = ''; // the current note's text as last confirmed by the server
+let saving = false; // a save is in flight; its text isn't confirmed yet
 let saveTimer = null;
 let saveChain = Promise.resolve(true);
 let busy = false; // a switch, create, or logout is in progress
@@ -38,13 +40,20 @@ class ApiError extends Error {
   }
 }
 
+// Requests time out so a stalled connection can't leave the app stuck.
 async function api(method, url, { body, type, headers = {} } = {}) {
-  const res = await fetch(url, {
-    method,
-    body,
-    headers: { ...(type ? { 'Content-Type': type } : {}), ...headers },
-    credentials: 'same-origin',
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      body,
+      headers: { ...(type ? { 'Content-Type': type } : {}), ...headers },
+      credentials: 'same-origin',
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (err) {
+    throw new ApiError(0, err.name === 'TimeoutError' ? 'the server did not respond' : 'network error');
+  }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new ApiError(res.status, data.error || `Request failed (${res.status})`);
@@ -62,11 +71,16 @@ function showError(err) {
   setStatus(err.message || 'Something went wrong.', true);
 }
 
+// A save still in flight counts as unsaved: the editor may have been changed
+// back to savedText while a different text is being written.
 function hasUnsaved() {
-  return currentId !== null && els.text.value !== savedText;
+  return currentId !== null && (saving || els.text.value !== savedText);
 }
 
-function openNote(id, text) {
+// A textarea turns CRLF/CR into LF, so normalize first; otherwise a note with
+// CRLF line endings would look edited as soon as it opens.
+function openNote(id, rawText) {
+  const text = rawText.replace(/\r\n?/g, '\n');
   currentId = id;
   savedText = text;
   els.text.value = text;
@@ -81,6 +95,7 @@ function showLogin(message = '') {
   notes = [];
   currentId = null;
   savedText = '';
+  saving = false;
   els.text.value = '';
   els.appView.hidden = true;
   els.loginView.hidden = false;
@@ -119,7 +134,7 @@ function renderList() {
 function updateNote(meta) {
   notes = notes.filter((n) => n.id !== meta.id);
   notes.push({ id: meta.id, label: meta.label, mtime: meta.mtime });
-  notes.sort((a, b) => b.mtime - a.mtime || a.id.localeCompare(b.id));
+  notes.sort((a, b) => b.mtime - a.mtime || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   renderList();
 }
 
@@ -139,6 +154,7 @@ async function saveNow() {
   const id = currentId;
   const text = els.text.value;
   setStatus('Saving…');
+  saving = true;
   try {
     const res = await api('PUT', `/api/notes/${id}`, {
       body: text,
@@ -146,11 +162,22 @@ async function saveNow() {
       headers: { 'X-Margin-Writer': writerId, 'X-Margin-Seq': String(++saveSeq) },
     });
     const meta = await res.json();
-    if (id === currentId) savedText = text;
+    saving = false;
     updateNote(meta);
-    if (id === currentId) setStatus(hasUnsaved() ? 'Unsaved changes' : 'Saved');
+    if (id !== currentId) return true;
+    if (meta.stale) {
+      // A newer save from this tab (the page-close save) got there first, so
+      // this text wasn't written. Save the editor's text again.
+      setStatus('Unsaved changes');
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(save, SAVE_DELAY_MS);
+      return true;
+    }
+    savedText = text;
+    setStatus(hasUnsaved() ? 'Unsaved changes' : 'Saved');
     return true;
   } catch (err) {
+    saving = false;
     if (err.status === 401) {
       setStatus('Not saved: you have been logged out. Copy your text before reloading the page.', true);
     } else if (err.status === 413) {
@@ -210,6 +237,7 @@ async function exclusive(fn) {
   if (busy) return;
   busy = true;
   els.text.readOnly = true;
+  els.appView.classList.add('busy');
   try {
     await fn(await save());
   } catch (err) {
@@ -217,6 +245,7 @@ async function exclusive(fn) {
   } finally {
     busy = false;
     els.text.readOnly = false;
+    els.appView.classList.remove('busy');
   }
 }
 

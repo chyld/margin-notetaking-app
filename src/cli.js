@@ -24,6 +24,7 @@ function hiddenInput() {
   const lines = [];
   let current = '';
   let afterCR = false;
+  let escape = null; // inside an escape sequence: 'start', 'csi' or 'ss3'
   let waiting = null;
 
   const close = () => {
@@ -41,7 +42,25 @@ function hiddenInput() {
   stdin.setRawMode(true);
   stdin.setEncoding('utf8');
   stdin.on('data', (data) => {
-    for (const ch of data.replace(/\x1b(\[[0-9;?]*[ -\/]*[@-~]|O.|.)?/g, '')) {
+    for (const ch of data) {
+      // Skip escape sequences. The state is kept across chunks, since a
+      // sequence can be split between two reads.
+      if (escape === 'start') {
+        escape = ch === '[' ? 'csi' : ch === 'O' ? 'ss3' : null;
+        continue;
+      }
+      if (escape === 'csi') {
+        if (ch >= '@' && ch <= '~') escape = null;
+        continue;
+      }
+      if (escape === 'ss3') {
+        escape = null;
+        continue;
+      }
+      if (ch === '\x1b') {
+        escape = 'start';
+        continue;
+      }
       const wasCR = afterCR;
       afterCR = ch === '\r';
       if (ch === '\u0003' || ch === '\u0004') {
@@ -114,4 +133,12 @@ async function main() {
   await createUser(username);
 }
 
-main().catch((err) => fail(err.message));
+main().catch((err) => {
+  if (err.code === 'EACCES') {
+    fail(
+      `${err.message}\nThe CLI runs as MARGIN_UID/MARGIN_GID (default 1000:1000), which must own ./data. ` +
+        'Set them in .env as described in the README.',
+    );
+  }
+  fail(err.message);
+});
