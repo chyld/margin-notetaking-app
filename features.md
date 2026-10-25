@@ -18,7 +18,11 @@
 - Two modes:
   - Raw mode: you see all the raw formatting
   - Render mode: you just see the colors, underline and bold
-- A menu bar with the formatting options
+- A menu bar with the formatting options, laid out like this popup:
+  - **B** (bold) and **U** (underline) toggles, and **Clear formatting**
+  - **Remove colour**
+  - a grid of color swatches, each showing a sample "a"
+  - hint at the bottom: "Enter applies · Esc closes"
 - 10 highlight colors:
 
   | Name         | Color     |
