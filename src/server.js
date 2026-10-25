@@ -288,10 +288,10 @@ async function notes(req, res, id, sub) {
     throw methodNotAllowed('GET, POST');
   }
 
-  if (!store.isNoteId(id)) throw new HttpError(404, 'Note not found');
-
+  // The tags route is matched (and its method checked) before the note id.
   if (sub === 'tags') {
     if (req.method !== 'PUT') throw methodNotAllowed('PUT');
+    if (!store.isNoteId(id)) throw new HttpError(404, 'Note not found');
     const order = saveOrder(req);
     const tags = await readTagsBody(req, { required: true });
     try {
@@ -302,6 +302,7 @@ async function notes(req, res, id, sub) {
     }
   }
   if (sub !== null) throw new HttpError(404, 'Not found');
+  if (!store.isNoteId(id)) throw new HttpError(404, 'Note not found');
 
   try {
     if (req.method === 'GET') {

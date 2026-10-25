@@ -29,7 +29,9 @@ const SIDECAR_MAX_BYTES = 4096;
 const LOCK_TIMEOUT_MS = 5_000;
 const SEQ_TTL_MS = 24 * 60 * 60 * 1000;
 
-const OPEN_NOFOLLOW = fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW;
+// O_NONBLOCK so opening a FIFO planted in place of a note or sidecar can't hang
+// the server; it has no effect on regular files, and anything else is rejected.
+const OPEN_NOFOLLOW = fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK;
 
 class NotFound extends Error {}
 class InvalidTags extends Error {}
@@ -226,11 +228,18 @@ async function readTags(file) {
     } else {
       const { fh, st } = opened;
       try {
-        if (st.size > SIDECAR_MAX_BYTES) {
+        // Read at most one byte past the limit, so the bound holds even if the
+        // file grows after the stat.
+        const buf = Buffer.alloc(SIDECAR_MAX_BYTES + 1);
+        const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+        if (st.size > SIDECAR_MAX_BYTES || bytesRead > SIDECAR_MAX_BYTES) {
           problem = 'too large';
         } else {
-          const parsed = JSON.parse(await fh.readFile('utf8'));
+          const parsed = JSON.parse(buf.toString('utf8', 0, bytesRead));
           if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) problem = 'not an object';
+          // A stored list is invalid if it has more than MAX_TAGS entries, even
+          // ones that would collapse as duplicates.
+          else if (Array.isArray(parsed.tags) && parsed.tags.length > MAX_TAGS) problem = 'too many tags';
           else return normalizeTags(parsed.tags);
         }
       } finally {
@@ -280,10 +289,15 @@ async function createNote(username, tags = []) {
   const file = notePath(username, id);
   const sidecar = sidecarPath(username, id);
   if (tags.length > 0) await writeTagsFile(sidecar, tags);
+  let created = false;
   try {
     await fsp.writeFile(file, '', { flag: 'wx', mode: 0o600 });
+    created = true;
     await syncDir(path.dirname(file));
   } catch (err) {
+    // Undo both files, so a failed create never leaves a note behind without
+    // the tags that were asked for.
+    if (created) await fsp.rm(file, { force: true });
     await fsp.rm(sidecar, { force: true });
     throw err;
   }
@@ -344,7 +358,11 @@ async function writeNote(username, id, text, { writer, seq } = {}) {
     const key = writer && `${file}\0text\0${writer}`;
     if (key) {
       const last = lastSeq.get(key);
-      if (last && seq <= last.seq) return { ...(await noteMeta(file, id)), stale: true };
+      if (last && seq <= last.seq) {
+        const meta = await noteMeta(file, id);
+        if (!meta) throw new NotFound();
+        return { ...meta, stale: true };
+      }
     }
     await writeFileAtomic(file, text);
     // Only a save that was actually written counts, so a failed one can be retried.

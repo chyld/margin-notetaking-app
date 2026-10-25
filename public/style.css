@@ -201,8 +201,16 @@ button.icon {
 }
 
 #note-tags {
-  display: contents;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
   list-style: none;
+}
+
+#note-tags:empty {
+  display: none;
 }
 
 #note-tags li {

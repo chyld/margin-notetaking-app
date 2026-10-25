@@ -122,6 +122,7 @@ function openNote(id, rawText) {
   els.text.disabled = false;
   setStatus('');
   setTagMessage('');
+  els.tagInput.value = ''; // a half-typed tag belongs to the previous note
   renderTags();
 }
 
@@ -170,6 +171,9 @@ function resetState() {
   tagsReloading = false;
   filterTag = '';
   filterOptionsKey = null;
+  els.filter.replaceChildren(els.filter.options[0]);
+  els.filter.value = '';
+  els.tagInput.value = '';
   els.text.value = '';
   els.text.disabled = true;
   setStatus('');
@@ -253,7 +257,9 @@ function renderList() {
 function updateNote(id, fields) {
   const note = findNote(id);
   if (!note) return;
-  Object.assign(note, fields);
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined) note[key] = value;
+  }
   notes.sort(byNewest);
   renderList();
 }
@@ -445,14 +451,17 @@ function addTag() {
     return;
   }
   const tags = findNote(currentId).tags;
-  els.tagInput.value = '';
-  setTagMessage('');
-  if (tags.includes(tag)) return;
+  if (tags.includes(tag)) {
+    // Already there: nothing to do (and nothing to clear).
+    els.tagInput.value = '';
+    return;
+  }
   if (tags.length >= MAX_TAGS) {
-    els.tagInput.value = tag;
     setTagMessage(`A note can have at most ${MAX_TAGS} tags.`);
     return;
   }
+  els.tagInput.value = '';
+  setTagMessage('');
   saveTags(currentId, [...tags, tag].sort());
 }
 
@@ -508,12 +517,14 @@ function selectNote(id) {
   });
 }
 
-// With a tag selected in the filter, the new note gets that tag.
+// With a tag selected in the filter, the new note gets that tag: the one
+// selected when New note was clicked, even if the filter changes meanwhile.
 function createNote() {
+  const tag = filterTag;
   return exclusive(async (saved) => {
     if (!saved) return;
-    const res = filterTag
-      ? await api('POST', '/api/notes', { body: JSON.stringify({ tags: [filterTag] }), type: 'application/json' })
+    const res = tag
+      ? await api('POST', '/api/notes', { body: JSON.stringify({ tags: [tag] }), type: 'application/json' })
       : await api('POST', '/api/notes');
     const meta = await res.json();
     notes.push({ id: meta.id, title: meta.title, mtime: meta.mtime, tags: meta.tags });
