@@ -60,6 +60,12 @@
   - a vertical bar in its color runs down the left of the section's content
 - In raw mode the heading line is shown as written
 
+## End of file marker
+
+- An end of file marker at the bottom of the note: a thin grey line
+  (`#c9cacb`) across the full width, ending in a small diamond at each end,
+  broken in the middle by three dots in a triangle (`#8c9099`)
+
 ## Saving
 
 - Saved only on demand (no autosave)
