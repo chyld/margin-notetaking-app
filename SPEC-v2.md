@@ -1,7 +1,7 @@
 # Margin v2 — Spec: collapsible sidebar, titles, dates, tags
 
 Builds on the current app (see ARCHITECTURE.md). Everything not mentioned here
-stays as it is.
+stays as it is. Revised after beta's spec review (7 reviewers).
 
 ## Features (from the user; nothing else is in scope)
 
@@ -32,61 +32,125 @@ stays as it is.
   the state is remembered in the browser (localStorage).
 - **Menu bar:** holds only tags (and the sidebar toggle when collapsed).
 
+Consequences, stated so they aren't surprises:
+
+- While the sidebar is collapsed, New note, the filter and Log out are not
+  available until it is expanded (they live in the sidebar).
+- Notes whose first line is blank are all titled "Untitled"; the date tells
+  them apart.
+- Across tabs, the last tag save to reach the server wins, and a save replaces
+  the whole tag set: a tab showing stale tags can remove a tag another tab
+  added. Same rule as text.
+
 ## Storage
 
 ```
 /data/notes/<username>/
-  <uuid>.txt     # note text (unchanged)
+  <uuid>.txt     # note text (unchanged); its existence is what makes a note
   <uuid>.json    # {"tags": ["ideas", "work"]}  (optional)
 ```
 
-- A missing `<uuid>.json` means no tags. Existing notes keep working.
-- Tags in the file are unique and sorted alphabetically.
-- Written with the existing atomic write (temp file, fsync, rename, fsync dir),
-  mode 0600, under the same per-note lock as text writes so a text save and a
-  tag save to one note never interleave.
+### Writing
+
+- Both files of a note are written under **one** per-note lock, keyed by the
+  note (its `.txt` path), never by the `.json` path. A text save and a tag save
+  to one note never interleave.
+- Sidecars use the existing atomic write (temp file, fsync, rename, fsync dir),
+  mode 0600.
+- Tags in the file are unique and sorted alphabetically. Removing the last tag
+  writes `{"tags": []}` (the file isn't deleted).
 - The note's "last update" is the mtime of `<uuid>.txt` only; writing
-  `<uuid>.json` does not touch it.
-- An unreadable or malformed `<uuid>.json` is logged and treated as no tags
-  (the note still lists and opens). It is overwritten on the next tag change.
-- Temp files from either kind of write are cleaned at startup (existing sweep).
-- The list never shows a `.json` file as a note (existing filename pattern).
+  `<uuid>.json` never touches it.
+- A tag save first checks, inside the lock, that `<uuid>.txt` exists and is a
+  regular file; otherwise 404 and nothing is written (no orphan sidecars).
+
+### Creating a tagged note
+
+1. Parse and validate the request's tags. Invalid → 400; nothing is created.
+2. If there are tags, write `<uuid>.json` first.
+3. Create `<uuid>.txt` (this is what makes the note exist and appear).
+4. If step 3 fails, remove the sidecar and return 500.
+
+A crash between steps 2 and 3 leaves a sidecar with no note. It is invisible
+(notes are listed by `.txt`), and the startup sweep removes `.json` files that
+have no matching `.txt`.
+
+### Reading
+
+- Opened with `O_NOFOLLOW`, must be a regular file, at most 4 KB read.
+- Valid means exactly: a JSON object whose `tags` is an array of at most 20
+  strings, each matching `^[a-z0-9]{1,32}$`. It is de-duplicated and sorted on
+  read.
+- Missing file → no tags. Anything else (unreadable, symlink, too big, bad
+  JSON, wrong shape, any invalid element) → treated as no tags, logged once per
+  file per server process. The note still lists and opens; the next tag save
+  overwrites the file.
+- An error reading the sidecar never fails the note's listing.
 
 ## Title
 
 - The first line of the file: text up to the first `\n` (a trailing `\r` is
-  dropped), read from the first 4 KB. Leading/trailing whitespace is trimmed for
-  display. Empty after trimming → "Untitled". Cut at 80 characters.
-- Change from today: today the label is the first *non-empty* line. A note that
-  starts with a blank line will now be titled "Untitled".
-- The field is renamed `label` → `title` in the API.
+  dropped), from the first 4 KB. Leading/trailing whitespace is trimmed for
+  display. Empty after trimming → "Untitled". Cut at 80 characters, counted as
+  Unicode code points (never splitting a character).
+- Change from today: today the label is the first *non-empty* line.
+- The field is renamed `label` → `title` in the API (the client and server ship
+  together; nothing else reads the API).
 
 ## Tags
 
-- Valid tag: `^[a-z0-9]{1,32}$`. Max 20 per note.
-- The server validates every tag set; invalid input → 400 with a message, and
-  nothing is written.
-- The menu bar input lowercases what's typed. Anything else outside `a-z0-9`
-  (spaces, punctuation, accents) is rejected with a message under the input;
-  nothing is silently stripped.
-- Across tabs, the most recent tag save wins (same rule as text).
+- Valid tag: `^[a-z0-9]{1,32}$`. Max 20 per note, counted after
+  de-duplication. Duplicates in a request are not an error.
+- The server validates every tag set; invalid → 400 with a message, nothing
+  written.
+- The menu bar input: surrounding whitespace is trimmed, one leading `#` is
+  dropped (tags are *displayed* with `#`), and the rest is lowercased. If what
+  remains is empty, Enter does nothing. If it contains anything outside
+  `a-z0-9` or is over 32 characters, it is rejected with a message; nothing
+  else is stripped.
 
-## API changes
+## API
 
-| Method | Path                 | Change                                                       |
+| Method | Path                 | Request → response                                           |
 |--------|----------------------|--------------------------------------------------------------|
-| GET    | /api/notes           | items become `{id, title, mtime, tags}`                      |
-| POST   | /api/notes           | optional JSON body `{"tags": [...]}` (used when a filter is active) → 201 `{id, title, mtime, tags}` |
-| PUT    | /api/notes/:id       | unchanged input; response `{id, title, mtime, tags[, stale]}` |
-| PUT    | /api/notes/:id/tags  | **new.** JSON `{"tags": [...]}` replaces the note's whole tag set → `{id, title, mtime, tags}`; 404 if the note doesn't exist; body ≤ 4 KB |
+| GET    | /api/notes           | → `[{id, title, mtime, tags}]`, newest first                 |
+| POST   | /api/notes           | optional JSON `{"tags": [...]}` → 201 `{id, title, mtime, tags}` |
+| GET    | /api/notes/:id       | unchanged (`text/plain`)                                     |
+| PUT    | /api/notes/:id       | unchanged input → `{id, title, mtime[, stale]}`              |
+| PUT    | /api/notes/:id/tags  | **new.** JSON `{"tags": [...]}` replaces the tag set → `{id, tags[, stale]}` |
 
-- `POST /api/notes` with a body requires `Content-Type: application/json`;
-  without a body it works as today.
-- `PUT /api/notes/:id/tags` goes through the same same-origin check, session
-  check and note-id validation as the other note routes. The server sorts and
-  de-duplicates; duplicates are not an error.
-- Tags are returned with every note so the client can build the dropdown and
-  filter without extra requests. No separate tags endpoint.
+- **Routing:** `/api/notes/<id>/tags` is matched before the note-id check.
+  Only PUT (405 `Allow: PUT` otherwise). `<id>` must be a valid note id;
+  anything else under `/api/notes/<id>/…` → 404.
+- **Text save response** no longer includes `tags`, and the tag response
+  doesn't include `title`/`mtime`, so neither can overwrite the other's data
+  on the client (see "Client state" below).
+- **`POST /api/notes` body:** no body (`Content-Length` absent or 0, no
+  `Transfer-Encoding`) works as today. Otherwise `Content-Type:
+  application/json` is required (415), the body is limited to 4 KB while
+  streaming (413), invalid JSON → 400. `{}` means no tags; `tags`, if present,
+  must be an array of strings (400 otherwise).
+- **`PUT /api/notes/:id/tags` body:** `Content-Type: application/json` (415),
+  4 KB streaming limit (413), invalid JSON → 400, `tags` **required** and an
+  array of strings (a missing key is a 400, never "clear all tags"). Same
+  same-origin check and session check as the other note routes.
+- **Tag save ordering:** tag saves carry `X-Margin-Writer` (the tab's id) and
+  their **own** `X-Margin-Seq` counter, separate from text saves. The server
+  keeps a separate last-applied number for tags (key
+  `<note>\0tags\0<writer>`), recorded only after the write succeeds. A tag save
+  whose number isn't higher than the last applied one from that tab is skipped
+  and returns the current tags with `stale: true`.
+
+## Client state
+
+- **List entries** hold `{id, title, mtime, tags}`. Text-save responses update
+  only `title` and `mtime`; tag-save responses update only `tags`. A response
+  never replaces a whole entry.
+- **The menu bar's tags** come only from: opening the note (from its list
+  entry), creating it, and tag-save responses for the open note.
+- Every tag request captures the note id when it starts. The list entry is
+  updated for that id; the menu bar only if that note is still open.
+- Tag lookups use `Set`/`Map`, never plain objects keyed by tag.
 
 ## UI
 
@@ -109,49 +173,80 @@ stays as it is.
 ```
 
 - **Filter dropdown:** "All notes" first, then every tag in the user's notes,
-  alphabetically. Picking a tag shows only notes that have it. The selection is
-  not remembered across reloads. If the selected tag no longer exists on any
-  note (its last use was removed), the dropdown resets to "All notes".
+  alphabetically. Picking a tag shows only notes that have it.
+  - The options are rebuilt only when the set of tags changes, keeping the
+    current selection, so an autosave never disturbs it.
+  - If the selected tag no longer exists on any note, the filter resets to
+    "All notes" (the variable and the `<select>` together).
+  - The selection resets to "All notes" on login and logout, and isn't
+    remembered across reloads.
+  - The dropdown is disabled when there are no tags.
 - The open note stays open in the editor even if a tag change hides it from
   the filtered list.
+- **Empty states:** no notes at all → "No notes yet". A filter that matches
+  nothing can't happen (it resets), but if the list is empty for any reason it
+  shows "No notes yet".
 - The list is still sorted by last update, newest first.
 - Dates use `toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })`.
 - All note-derived text (titles, tags) is set with `textContent`.
 
 ### Sidebar (collapsed)
 
-- The sidebar is hidden completely; the editor takes the full width.
-- A » button at the left of the menu bar expands it again.
+- The sidebar gets the `hidden` attribute (out of the layout and the tab
+  order); the editor takes the full width.
+- A » button at the left of the menu bar expands it again. It is always
+  enabled, even with no note open.
+- Both toggles have `aria-expanded` and an accessible label.
 - State is kept in `localStorage` (`margin.sidebarCollapsed` = `"1"`), applied
-  on load before the first render so it doesn't flash.
+  before the first render. Reads and writes are wrapped in try/catch; if
+  storage is unavailable the sidebar starts expanded and the toggle still works
+  for the session.
 
 ### Menu bar (top of the editor)
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │ »  #home ×  #weekly ×   [ add tag… ]                         │
+│    tag message (errors), when there is one                   │
 ├──────────────────────────────────────────────────────────────┤
 │ textarea                                                     │
 ```
 
 - Shows the open note's tags, each with an × to remove it, and an input to
-  add one. Enter adds the typed tag.
-- Adding a tag that's already there does nothing. Adding a 21st tag is refused
-  with a message.
-- Each add/remove sends `PUT /api/notes/:id/tags` right away (no debounce).
-  While it is in flight the tag controls are disabled, so tag saves for a note
-  never overlap. On failure the menu bar goes back to the last saved tags and
-  the error shows in the status line.
-- When no note is open, the tag controls are disabled.
-- Tag saves are separate from text autosave: they don't wait for it and don't
-  affect "Unsaved changes". Switching notes waits for an in-flight tag save, as
-  it does for text.
-- After a tag save, the list entry and dropdown update from the response.
+  add one. Enter adds the typed tag. Adding a tag that's already there does
+  nothing. Adding a 21st is refused with a message.
+- **One tag save at a time.** While a tag save is in flight, or while a
+  switch/create/logout is running, the × buttons and the input are read-only
+  (the input keeps focus, so the next tag can be typed right away).
+- Each add/remove sends `PUT /api/notes/:id/tags` right away, with
+  `keepalive: true` (the body is tiny), so a change made just before closing
+  the tab still goes through.
+- **Tag messages** (invalid input, limit, save errors) appear in their own line
+  under the input, never in the text status line. A message clears on the next
+  successful tag action or when another note is opened.
+- **On failure:**
+  - 400 / 404 / 413 / 415 (the server wrote nothing): the menu bar goes back to
+    the last saved tags and the message says why.
+  - 401: same handling as a text save (logged-out message).
+  - Network error, timeout or 5xx (the save may or may not have happened): the
+    client reloads `GET /api/notes`, takes that note's tags from it, and shows
+    "Couldn't confirm the tag change". Tag edits stay read-only until that
+    reload finishes.
+  - `stale: true`: adopt the returned tags.
+- **Switching / creating / logging out** (`exclusive()`) waits for an in-flight
+  tag save as well as the text save, whatever its outcome; a failed tag save
+  doesn't block the switch.
+- When no note is open, the tag input and × buttons are disabled.
 
 ### New note with a filter
 
 - With a tag selected, New note sends `POST /api/notes` with
   `{"tags": ["<selected>"]}`, so the new note appears in the filtered list.
+
+## Docs
+
+ARCHITECTURE.md (files on disk, title rule, API table, frontend) and README.md
+(data layout, usage) are updated in the same change.
 
 ## Out of scope
 
