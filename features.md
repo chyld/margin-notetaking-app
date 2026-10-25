@@ -43,6 +43,7 @@
 
 ## Users
 
+- For fewer than 5 users
 - Multiple users, created with a CLI tool
 - Logout button
 
