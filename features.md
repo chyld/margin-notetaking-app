@@ -62,8 +62,11 @@
 
 ## Screenshots
 
-- Screenshots can be added to notes
-- Stored as PNG
+- Screenshots can be added to notes by pasting
+- Only PNG screenshots are allowed
+- Written in the note as `![](a7p2xq9d.png)`
+- No size limit
+- Uploaded images are kept, even if their line is removed from the note
 - Each note is stored in its own folder, together with its screenshots
 
 ## End of file marker
