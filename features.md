@@ -17,7 +17,8 @@
   - combined: `=={lime+b+u}yearbook==`
 - Two modes:
   - Raw mode: you see all the raw formatting
-  - Render mode: you just see the colors, underline and bold
+  - Render mode: you just see the colors, underline and bold, and the title
+    (the note's first line) is shown in a large font
 - A menu bar with the formatting options, laid out like this popup:
   - **B** (bold) and **U** (underline) toggles, and **Clear formatting**
   - **Remove colour**
