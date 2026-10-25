@@ -1,36 +1,52 @@
 # Margin — Features
 
-- The app is called Margin
-- Notes are plain text only (no markdown)
-- The list of notes is on the left; the note being worked on is on the right
-- A button to create a new note
-- Runs with Docker Compose
-- No database; everything is kept in files
-- Multiple users; new users are created with a CLI tool
-- A logout button
-- The note list is sorted by last modified
+## Notes
+
+- Plain text only (no markdown)
+- A note's title is its first line
+- New note button
 - Empty notes are fine
-- The same note open in two tabs: the most recent update wins
-- Full network access on port 5555
-- Plain HTTP
-- A README with instructions to install and set up the app
-- A favicon
-- The sidebar can be collapsed
-- A note's title is the first line of its file
-- In the sidebar, under each title, the last update date/time in a smaller font
-- A menu bar at the top of the note where tags can be added to the note
-- A tag is lowercase, no spaces, only a-z and 0-9
-- In the sidebar, under each title, the note's tags
-- At the top of the sidebar, a dropdown to pick a tag; the list then shows only notes with that tag
-- No autosave; a note is saved only on demand
-- A Save button in the menu bar
-- The Save button is colored according to its state
+
+## Saving
+
+- Saved only on demand (no autosave)
+- Save button in the menu bar, colored by state
 - Ctrl+S saves
-- The browser always prompts before changes would be lost
-- Tags are saved automatically when changed
-- A particular note can be bookmarked
-- A particular tag can be bookmarked
+- The browser prompts before changes would be lost
+- Two tabs on the same note: the most recent update wins
+
+## Layout and sidebar
+
+- Note list on the left, open note on the right
+- Collapsible sidebar
+- List sorted by last modified
+- Each note shows its title, last update date/time (smaller), and tags
+
+## Tags
+
+- Added in a menu bar at the top of the note
+- Lowercase, no spaces, only a-z and 0-9
+- Saved automatically when changed
+- Dropdown at the top of the sidebar filters the list by tag
+
+## Links
+
+- Bookmark a note or a tag
 - Links use `?` in the URL
-- Opening a link while logged out requires logging in first
-- Not found returns 404
-- Back and Forward buttons are ignored
+- Logged out: log in first
+- Not found: 404
+- Back and Forward are ignored
+
+## Users
+
+- Multiple users, created with a CLI tool
+- Logout button
+
+## Setup
+
+- Called Margin
+- Docker Compose
+- No database; everything is stored in files
+- Full network access on port 5555, plain HTTP
+- README with install and setup instructions
+- Favicon
