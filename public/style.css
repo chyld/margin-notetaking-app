@@ -264,6 +264,53 @@ button.icon {
   cursor: progress;
 }
 
+/* Save: the label changes with the state as well as the color. */
+#save {
+  margin-left: auto;
+  min-width: 96px;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 4px 12px;
+  color: #656d76;
+  background: #f3f4f6;
+  border-color: #d0d7de;
+}
+
+#save[aria-disabled="true"] {
+  cursor: default;
+}
+
+#save[data-state="unsaved"] {
+  color: #3b2300;
+  background: #f5c451;
+  border-color: #d9a520;
+}
+
+#save[data-state="unsaved"]:hover {
+  background: #f0b630;
+}
+
+#save[data-state="saving"] {
+  color: #6b5a33;
+  background: #f8e2a8;
+  border-color: #ecd08a;
+  cursor: progress;
+}
+
+#save[data-state="failed"] {
+  color: #fff;
+  background: #cf222e;
+  border-color: #a40e26;
+}
+
+#save[data-state="failed"]:hover {
+  background: #b81d28;
+}
+
+#save:disabled {
+  opacity: 0.6;
+}
+
 #tag-message {
   margin: 0;
   padding: 0 16px;

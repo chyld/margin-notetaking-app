@@ -87,8 +87,17 @@ Log in with the username and password you created.
 - **Filter:** the dropdown at the top of the list shows only notes with the
   chosen tag. A new note created while filtering gets that tag.
 - **«** hides the sidebar and **»** brings it back; the browser remembers which.
-- Notes save automatically as you type. The line under the editor shows
-  "Saving…", "Saved", or an error if a save failed.
+- **Saving:** notes are saved only when you click **Save** (top right of the
+  note) or press **Ctrl+S** (**⌘S** on a Mac). The button shows the state:
+  grey "Saved", amber "Save" (unsaved changes), "Saving…", or red "Save again"
+  if the last save failed. Tags are different: they save as soon as you add
+  or remove one.
+- **Unsaved changes:** switching notes, New note or Log out asks before
+  discarding them, and so does closing or reloading the tab. Discarding can't
+  be undone. Mobile browsers sometimes close a tab without asking, so save
+  before leaving Margin on a phone.
+- If you're logged out (session expired) with unsaved text, the text stays on
+  screen: log in again in another tab, then press Save.
 - **Log out** is at the top of the list.
 
 ## Day-to-day

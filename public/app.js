@@ -1,10 +1,8 @@
 'use strict';
 
-const SAVE_DELAY_MS = 500;
-const RETRY_DELAY_MS = 3000;
 const REQUEST_TIMEOUT_MS = 30_000;
-// Browsers refuse keepalive requests whose bodies total more than 64 KiB.
-const KEEPALIVE_MAX_BYTES = 60 * 1024;
+// Only used for the shortcut hint; both Ctrl+S and ⌘S work everywhere.
+const IS_APPLE = /Mac|iPhone|iPad/.test(navigator.userAgent);
 const TAG_RE = /^[a-z0-9]{1,32}$/;
 const MAX_TAGS = 20;
 const SIDEBAR_KEY = 'margin.sidebarCollapsed';
@@ -26,6 +24,7 @@ const els = {
   noteTags: document.getElementById('note-tags'),
   tagInput: document.getElementById('tag-input'),
   tagMessage: document.getElementById('tag-message'),
+  save: document.getElementById('save'),
   text: document.getElementById('note-text'),
   status: document.getElementById('status'),
 };
@@ -34,8 +33,10 @@ let notes = []; // [{ id, title, mtime, tags }], newest first
 let currentId = null;
 let savedText = ''; // the current note's text as last confirmed by the server
 let saving = false; // a save is in flight; its text isn't confirmed yet
-let saveTimer = null;
-let saveChain = Promise.resolve(true);
+// The last save failed. Until a save succeeds the note counts as unsaved even
+// if the text was edited back: after a timeout the server may hold the failed text.
+let saveFailed = false;
+let saveChain = Promise.resolve(); // the save in flight, if any
 let busy = false; // a switch, create, or logout is in progress
 let filterTag = ''; // '' means all notes
 let filterOptionsKey = null; // the tag set the dropdown was last built from
@@ -93,8 +94,15 @@ function setTagMessage(message) {
   els.tagMessage.textContent = message;
 }
 
+const LOGGED_OUT = "You've been logged out. Log in again in another tab, then press Save.";
+
+// A 401 never clears text that could be lost: with changes on screen it stays
+// on the notes view and says how to save them.
 function showError(err) {
-  if (err.status === 401) return showLogin();
+  if (err.status === 401) {
+    if (!hasChangesToLose()) return showLogin();
+    return setStatus(LOGGED_OUT, true);
+  }
   setStatus(err.message || 'Something went wrong.', true);
 }
 
@@ -109,7 +117,13 @@ function findNote(id) {
 // A save still in flight counts as unsaved: the editor may have been changed
 // back to savedText while a different text is being written.
 function hasUnsaved() {
-  return currentId !== null && (saving || els.text.value !== savedText);
+  return currentId !== null && (saving || saveFailed || els.text.value !== savedText);
+}
+
+// What a switch, logout or leaving the page would throw away: unsaved text or
+// a half-typed tag.
+function hasChangesToLose() {
+  return hasUnsaved() || (currentId !== null && els.tagInput.value.trim() !== '');
 }
 
 // A textarea turns CRLF/CR into LF, so normalize first; otherwise a note with
@@ -118,12 +132,14 @@ function openNote(id, rawText) {
   const text = rawText.replace(/\r\n?/g, '\n');
   currentId = id;
   savedText = text;
+  saveFailed = false;
   els.text.value = text;
   els.text.disabled = false;
   setStatus('');
   setTagMessage('');
   els.tagInput.value = ''; // a half-typed tag belongs to the previous note
   renderTags();
+  renderSave();
 }
 
 // ---- sidebar collapse ----------------------------------------------------
@@ -162,11 +178,11 @@ els.expand.addEventListener('click', () => {
 // ---- views ---------------------------------------------------------------
 
 function resetState() {
-  clearTimeout(saveTimer);
   notes = [];
   currentId = null;
   savedText = '';
   saving = false;
+  saveFailed = false;
   tagSave = null;
   tagsReloading = false;
   filterTag = '';
@@ -178,6 +194,7 @@ function resetState() {
   els.text.disabled = true;
   setStatus('');
   setTagMessage('');
+  renderSave();
 }
 
 function showLogin(message = '') {
@@ -296,21 +313,58 @@ function renderTags() {
 
 // ---- saving text ---------------------------------------------------------
 
-// Saves are chained so only one request is in flight at a time and they can
-// never arrive out of order. Resolves to false if the save failed.
+// Text is saved only on demand: the Save button or Ctrl+S / ⌘S.
+
+function canSave() {
+  return currentId !== null && !busy && !saving && hasUnsaved();
+}
+
+// Shows the Save button's state; the first match wins. "saving" and "saved"
+// use aria-disabled rather than disabled, so a focused button keeps focus.
+function renderSave() {
+  const button = els.save;
+  let state;
+  let label = 'Save';
+  if (currentId === null) state = 'none';
+  else if (busy) {
+    state = 'locked';
+    label = button.textContent;
+  } else if (saving) {
+    state = 'saving';
+    label = 'Saving…';
+  } else if (saveFailed) {
+    state = 'failed';
+    label = 'Save again';
+  } else if (els.text.value !== savedText) state = 'unsaved';
+  else {
+    state = 'saved';
+    label = 'Saved';
+  }
+  button.dataset.state = state;
+  button.textContent = label;
+  button.disabled = state === 'none' || state === 'locked';
+  button.setAttribute('aria-disabled', String(state !== 'failed' && state !== 'unsaved'));
+}
+
+function saveErrorMessage(err) {
+  if (err.status === 401) return `Not saved: ${LOGGED_OUT.charAt(0).toLowerCase()}${LOGGED_OUT.slice(1)}`;
+  if (err.status === 413) return 'Not saved: this note is over 1 MB. Remove some text, then press Save again.';
+  return `Not saved: ${err.message}. Press Save to try again.`;
+}
+
+// Saves the editor's text. Does nothing unless a save is possible; there is
+// never more than one save in flight.
 function save() {
-  clearTimeout(saveTimer);
-  saveTimer = null;
-  saveChain = saveChain.then(saveNow);
-  return saveChain;
+  if (!canSave()) return;
+  saveChain = saveNow();
 }
 
 async function saveNow() {
-  if (!hasUnsaved()) return true;
   const id = currentId;
   const text = els.text.value;
-  setStatus('Saving…');
   saving = true;
+  setStatus('Saving…');
+  renderSave();
   try {
     const res = await api('PUT', `/api/notes/${id}`, {
       body: text,
@@ -318,70 +372,59 @@ async function saveNow() {
       headers: { 'X-Margin-Writer': writerId, 'X-Margin-Seq': String(++saveSeq) },
     });
     const meta = await res.json();
-    saving = false;
+    // Saves are never concurrent, so this shouldn't happen; if it does, the
+    // text wasn't written and the stale title/date aren't applied.
+    if (meta.stale) throw new ApiError(409, 'the server skipped this save');
     updateNote(id, { title: meta.title, mtime: meta.mtime });
-    if (id !== currentId) return true;
-    if (meta.stale) {
-      // A newer save from this tab (the page-close save) got there first, so
-      // this text wasn't written. Save the editor's text again.
-      setStatus('Unsaved changes');
-      clearTimeout(saveTimer);
-      saveTimer = setTimeout(save, SAVE_DELAY_MS);
-      return true;
+    if (id === currentId) {
+      savedText = text;
+      saveFailed = false;
+      setStatus(els.text.value !== savedText ? 'Unsaved changes' : 'Saved');
     }
-    savedText = text;
-    setStatus(hasUnsaved() ? 'Unsaved changes' : 'Saved');
-    return true;
   } catch (err) {
-    saving = false;
-    if (err.status === 401) {
-      setStatus('Not saved: you have been logged out. Copy your text before reloading the page.', true);
-    } else if (err.status === 413) {
-      setStatus('Not saved: this note is over 1 MB. Remove some text to save it.', true);
-    } else {
-      setStatus(`Not saved: ${err.message}. Retrying…`, true);
-      clearTimeout(saveTimer);
-      saveTimer = setTimeout(save, RETRY_DELAY_MS);
+    if (id === currentId) {
+      saveFailed = true;
+      setStatus(saveErrorMessage(err), true);
     }
-    return false;
+  } finally {
+    saving = false;
+    renderSave();
   }
 }
 
 els.text.addEventListener('input', () => {
   if (currentId === null) return;
-  setStatus('Unsaved changes');
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(save, SAVE_DELAY_MS);
+  // Keep "Saving…" and a "Not saved: …" message until the save ends or the
+  // next attempt starts.
+  if (!saving && !saveFailed) setStatus(hasUnsaved() ? 'Unsaved changes' : 'Saved');
+  renderSave();
 });
 
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden' && hasUnsaved()) save();
+els.save.addEventListener('click', () => {
+  if (els.save.getAttribute('aria-disabled') === 'true') return;
+  save();
+});
+els.save.title = IS_APPLE ? 'Save (⌘S)' : 'Save (Ctrl+S)';
+els.save.setAttribute('aria-keyshortcuts', IS_APPLE ? 'Meta+S' : 'Control+S');
+
+// Ctrl+S / ⌘S saves anywhere in the notes view and never opens the browser's
+// "Save page". The login view is left alone; Shift and Alt (AltGr) combinations
+// aren't taken. Matching the key code too covers Caps Lock and other layouts.
+document.addEventListener('keydown', (event) => {
+  if (els.appView.hidden) return;
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+  if (event.code !== 'KeyS' && (event.key || '').toLowerCase() !== 's') return;
+  event.preventDefault();
+  if (event.repeat || event.isComposing) return;
+  save();
 });
 
-// Last-chance save when the page is closed. keepalive lets the request outlive
-// the page; its higher number makes the server skip any older save from this
-// tab that is still in flight.
-window.addEventListener('pagehide', () => {
-  if (!hasUnsaved()) return;
-  const body = els.text.value;
-  if (new Blob([body]).size > KEEPALIVE_MAX_BYTES) return;
-  fetch(`/api/notes/${currentId}`, {
-    method: 'PUT',
-    body,
-    headers: {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'X-Margin-Writer': writerId,
-      'X-Margin-Seq': String(++saveSeq),
-    },
-    credentials: 'same-origin',
-    keepalive: true,
-  }).catch(() => {});
-});
-
-// A note too large for the keepalive save can't be saved reliably while the
-// page closes, so ask before leaving with those changes unsaved.
+// Ask before the page is closed, reloaded or left with changes that would be
+// lost (including while a save is in flight, since leaving cancels it).
 window.addEventListener('beforeunload', (event) => {
-  if (hasUnsaved() && new Blob([els.text.value]).size > KEEPALIVE_MAX_BYTES) event.preventDefault();
+  if (!hasChangesToLose()) return;
+  event.preventDefault();
+  event.returnValue = true; // needed by Firefox, Safari and older browsers
 });
 
 // ---- saving tags ---------------------------------------------------------
@@ -483,33 +526,41 @@ els.tagInput.addEventListener('keydown', (event) => {
 // ---- actions -------------------------------------------------------------
 
 // Runs one switch/create/logout at a time; clicks made meanwhile are ignored.
-// The editor and tag controls are locked throughout, so nothing lands on the
-// wrong note. It waits for the text save and any tag save; `fn` receives
-// whether the text was saved.
+// Everything is locked first (editor, tags, Save, Ctrl+S), so no save can start;
+// then it waits for any save already in flight, never starting one. If changes
+// would be lost it asks once; Cancel leaves everything as it was.
 async function exclusive(fn) {
   if (busy) return;
   busy = true;
   els.text.readOnly = true;
   els.appView.classList.add('busy');
   renderTags();
+  renderSave();
+  let discarded = false;
   try {
-    const saved = await save();
+    await saveChain;
     await tagChain;
-    await fn(saved);
+    if (hasChangesToLose()) {
+      if (!confirm('You have unsaved changes in this note. Discard them?')) return;
+      discarded = true;
+    }
+    await fn();
   } catch (err) {
-    showError(err);
+    // After a confirmed discard there is nothing left to keep on screen.
+    if (err.status === 401 && discarded) showLogin();
+    else showError(err);
   } finally {
     busy = false;
     els.text.readOnly = false;
     els.appView.classList.remove('busy');
     renderTags();
+    renderSave();
   }
 }
 
 function selectNote(id) {
   if (id === currentId) return;
-  return exclusive(async (saved) => {
-    if (!saved) return;
+  return exclusive(async () => {
     const res = await api('GET', `/api/notes/${id}`);
     openNote(id, await res.text());
     renderList();
@@ -521,8 +572,7 @@ function selectNote(id) {
 // selected when New note was clicked, even if the filter changes meanwhile.
 function createNote() {
   const tag = filterTag;
-  return exclusive(async (saved) => {
-    if (!saved) return;
+  return exclusive(async () => {
     const res = tag
       ? await api('POST', '/api/notes', { body: JSON.stringify({ tags: [tag] }), type: 'application/json' })
       : await api('POST', '/api/notes');
@@ -536,8 +586,7 @@ function createNote() {
 }
 
 function logout() {
-  return exclusive(async (saved) => {
-    if (!saved && !confirm('Your latest changes are not saved. Log out anyway?')) return;
+  return exclusive(async () => {
     await api('POST', '/api/logout');
     showLogin();
   });

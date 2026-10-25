@@ -18,7 +18,8 @@ Decisions from the user:
 - Full network access on port 5555, plain HTTP.
 
 v2 adds a collapsible sidebar, titles, update dates and tags; see SPEC-v2.md
-for the full spec and its decisions.
+for the full spec and its decisions. v3 replaces autosave with a Save button
+and Ctrl+S / ⌘S, with prompts before changes are lost; see SPEC-v3.md.
 
 ## Overview
 
@@ -160,19 +161,22 @@ mapped onto the filesystem.
   unknown outcome re-reads the tags from the server.
 - **Filter:** "All notes" plus every tag; resets if its tag disappears, and on
   login/logout. New note while filtering gets the selected tag.
-- **Autosave:** 500 ms after typing stops, when switching notes, creating a
-  note, logging out, or hiding the tab. Saves are chained so only one is in
-  flight. "Unsaved" means the editor differs from the text the server last
-  confirmed, or a save is in flight. Requests time out after 30 s. Note text is
-  normalized to LF on load (a textarea does that anyway). A save the server
-  skipped as stale is not treated as confirmed; the editor text is saved again.
-- **Closing the page:** a `keepalive` PUT with the next sequence number (so an
-  older in-flight save can't overwrite it). Browsers cap keepalive bodies at
-  64 KiB, so for larger unsaved notes the browser asks before leaving.
-- **Switch / new note / logout** run one at a time (extra clicks are ignored,
-  and the sidebar buttons are dimmed meanwhile) with the editor read-only
-  throughout. They save first; if that fails, switching
-  and creating stop, and logout asks for confirmation.
-- **Failed saves** show the error and retry every 3 s, except 401 (logged out)
-  and 413 (over 1 MB), which say what to do.
+- **Saving is on demand only** (v3): the Save button at the right of the menu
+  bar or Ctrl+S / ⌘S (matched on the S key code, no Shift/Alt; ignored while
+  locked, saving, or with nothing to save; the browser's Save page is always
+  suppressed in the notes view). One save at a time, no queueing, no automatic
+  retry. "Unsaved" = the editor differs from the text the server last
+  confirmed, a save is in flight, or the last save failed (a failed save keeps
+  the note unsaved until a save succeeds, since a timed-out save may still have
+  reached the server). Requests time out after 30 s. Note text is normalized to
+  LF on load. A `stale` response counts as a failure.
+- **Save button states** (first match): none (disabled), locked (disabled),
+  saving ("Saving…"), failed (red, "Save again"), unsaved (amber, "Save"),
+  saved (grey, "Saved"). Saving/saved use `aria-disabled` so focus stays.
+- **Prompts:** switch / new note / logout lock everything, wait for any save in
+  flight (never starting one), then `confirm()` once if there are unsaved
+  changes or a half-typed tag; Cancel changes nothing. `beforeunload` prompts
+  in the same cases. Mobile browsers may skip that prompt (accepted limit).
+- **Logged out (401):** never clears text that could be lost; the status says
+  to log in again in another tab and press Save.
 - After each save the list title and order update.
