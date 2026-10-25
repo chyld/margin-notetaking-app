@@ -311,6 +311,11 @@ button.icon {
   opacity: 0.6;
 }
 
+/* Locked while switching notes, creating one, or logging out. */
+#app-view.busy #save {
+  cursor: progress;
+}
+
 #tag-message {
   margin: 0;
   padding: 0 16px;

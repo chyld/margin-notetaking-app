@@ -215,8 +215,8 @@ function showApp(list) {
   renderTags();
 }
 
-// Rebuilds the filter options only when the set of tags changes, so an
-// autosave never disturbs the dropdown. A selected tag that no longer exists
+// Rebuilds the filter options only when the set of tags changes, so a save
+// or tag change never disturbs the dropdown. A selected tag that no longer exists
 // resets the filter to all notes.
 function renderFilter() {
   const all = new Set();
@@ -321,15 +321,18 @@ function canSave() {
 
 // Shows the Save button's state; the first match wins. "saving" and "saved"
 // use aria-disabled rather than disabled, so a focused button keeps focus.
+// While a switch/create/logout runs the button is locked: disabled and dimmed,
+// keeping the look and label it had.
 function renderSave() {
   const button = els.save;
+  if (busy && currentId !== null) {
+    button.disabled = true;
+    return;
+  }
   let state;
   let label = 'Save';
   if (currentId === null) state = 'none';
-  else if (busy) {
-    state = 'locked';
-    label = button.textContent;
-  } else if (saving) {
+  else if (saving) {
     state = 'saving';
     label = 'Saving…';
   } else if (saveFailed) {
@@ -342,12 +345,12 @@ function renderSave() {
   }
   button.dataset.state = state;
   button.textContent = label;
-  button.disabled = state === 'none' || state === 'locked';
+  button.disabled = state === 'none';
   button.setAttribute('aria-disabled', String(state !== 'failed' && state !== 'unsaved'));
 }
 
 function saveErrorMessage(err) {
-  if (err.status === 401) return `Not saved: ${LOGGED_OUT.charAt(0).toLowerCase()}${LOGGED_OUT.slice(1)}`;
+  if (err.status === 401) return "Not saved: you've been logged out. Log in again in another tab, then press Save again.";
   if (err.status === 413) return 'Not saved: this note is over 1 MB. Remove some text, then press Save again.';
   return `Not saved: ${err.message}. Press Save to try again.`;
 }
@@ -448,7 +451,9 @@ function saveTags(id, tags) {
     } catch (err) {
       const here = id === currentId;
       if (err.status === 401) {
-        if (here) setTagMessage('Tag not saved: you have been logged out.');
+        // With nothing on screen that could be lost, go to the login form.
+        if (!hasChangesToLose()) showLogin();
+        else if (here) setTagMessage('Tag not saved: you have been logged out.');
       } else if ([400, 404, 413, 415].includes(err.status)) {
         // The server wrote nothing, so the saved tags are still right.
         if (here) setTagMessage(`Tag not saved: ${err.message}`);

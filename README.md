@@ -97,7 +97,7 @@ Log in with the username and password you created.
   be undone. Mobile browsers sometimes close a tab without asking, so save
   before leaving Margin on a phone.
 - If you're logged out (session expired) with unsaved text, the text stays on
-  screen: log in again in another tab, then press Save.
+  screen: log in again in another tab, then press Save again.
 - **Log out** is at the top of the list.
 
 ## Day-to-day

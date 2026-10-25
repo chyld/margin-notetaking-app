@@ -151,7 +151,8 @@ mapped onto the filesystem.
   note", then the note list: title, update date/time, tags (all set with
   `textContent`, never HTML). Collapsed state is kept in localStorage.
 - **Right:** a menu bar (» toggle when collapsed, the note's tags with ×, an
-  add-tag input, a tag message line), then a `<textarea>`; disabled until a
+  add-tag input, and the Save button pushed to the right; a tag message line
+  below it), then a `<textarea>`; disabled until a
   note is selected or created. A status line shows Unsaved changes / Saving… /
   Saved / Not saved.
 - **Tags** save immediately, one at a time, with `keepalive`. Text-save
@@ -170,8 +171,8 @@ mapped onto the filesystem.
   the note unsaved until a save succeeds, since a timed-out save may still have
   reached the server). Requests time out after 30 s. Note text is normalized to
   LF on load. A `stale` response counts as a failure.
-- **Save button states** (first match): none (disabled), locked (disabled),
-  saving ("Saving…"), failed (red, "Save again"), unsaved (amber, "Save"),
+- **Save button states** (first match): none (disabled), locked (disabled and
+  dimmed, keeping its previous look), saving ("Saving…"), failed (red, "Save again"), unsaved (amber, "Save"),
   saved (grey, "Saved"). Saving/saved use `aria-disabled` so focus stays.
 - **Prompts:** switch / new note / logout lock everything, wait for any save in
   flight (never starting one), then `confirm()` once if there are unsaved
