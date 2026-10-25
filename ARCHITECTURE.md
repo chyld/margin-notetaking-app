@@ -101,7 +101,8 @@ docker compose exec margin node src/cli.js create-user <username>
 
 ## HTTP
 
-Static: exactly `/`, `/app.js`, `/style.css`, served from memory. No URL is
+Static: exactly `/`, `/app.js`, `/style.css`, `/favicon.svg`, `/favicon.ico` and
+`/apple-touch-icon.png`, served from memory. No URL is
 mapped onto the filesystem.
 
 | Method | Path            | Notes                                                          |

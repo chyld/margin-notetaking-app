@@ -27,6 +27,9 @@ const STATIC_FILES = {
   '/': { file: 'index.html', type: 'text/html; charset=utf-8' },
   '/app.js': { file: 'app.js', type: 'text/javascript; charset=utf-8' },
   '/style.css': { file: 'style.css', type: 'text/css; charset=utf-8' },
+  '/favicon.svg': { file: 'favicon.svg', type: 'image/svg+xml' },
+  '/favicon.ico': { file: 'favicon.ico', type: 'image/x-icon' },
+  '/apple-touch-icon.png': { file: 'apple-touch-icon.png', type: 'image/png' },
 };
 for (const entry of Object.values(STATIC_FILES)) {
   entry.body = fs.readFileSync(path.join(PUBLIC_DIR, entry.file));

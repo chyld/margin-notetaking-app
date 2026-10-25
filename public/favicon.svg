@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Shapes sit on a 4-unit grid so they stay crisp at 16x16. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f3640"/>
+      <stop offset="1" stop-color="#1b1f24"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fffdf6"/>
+      <stop offset="1" stop-color="#f0ebdd"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="12" fill="url(#bg)"/>
+  <!-- page with a folded corner -->
+  <path d="M10 8h34l12 12v34a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z" fill="url(#paper)"/>
+  <path d="M44 8v10a2 2 0 0 0 2 2h10z" fill="#d6cfbd"/>
+  <!-- the margin rule -->
+  <rect x="16" y="8" width="4" height="48" fill="#e5484d"/>
+  <!-- lines of text -->
+  <rect x="24" y="28" width="24" height="4" rx="2" fill="#39424d"/>
+  <rect x="24" y="36" width="24" height="4" rx="2" fill="#39424d"/>
+  <rect x="24" y="44" width="12" height="4" rx="2" fill="#39424d"/>
+</svg>
